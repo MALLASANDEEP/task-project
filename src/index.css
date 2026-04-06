@@ -102,7 +102,16 @@
   * {
     @apply border-border;
   }
+  html {
+    min-height: 100%;
+  }
   body {
-    @apply bg-background text-foreground font-sans antialiased;
+    @apply min-h-screen bg-background text-foreground font-sans antialiased;
+  }
+  .h-svh {
+    height: 100svh;
+  }
+  .min-h-svh {
+    min-height: 100svh;
   }
 }

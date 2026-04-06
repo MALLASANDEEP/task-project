@@ -92,7 +92,7 @@ export default function Projects() {
                 <CardTitle className="text-base">{p.title}</CardTitle>
                 <PriorityBadge priority={p.priority} />
               </div>
-              <CardDescription className="line-clamp-2">{p.description}</CardDescription>
+              <CardDescription className="mt-1 max-h-12 overflow-hidden text-sm text-muted-foreground">{p.description}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="flex items-center gap-4 text-xs text-muted-foreground">

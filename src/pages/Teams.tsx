@@ -148,7 +148,7 @@ export default function Teams() {
                     <Users className="h-4 w-4" />
                     {team.name}
                   </CardTitle>
-                  <CardDescription className="mt-1 line-clamp-2">{team.description}</CardDescription>
+                  <CardDescription className="mt-1 max-h-12 overflow-hidden text-sm text-muted-foreground">{team.description}</CardDescription>
                 </div>
                 <Badge variant="secondary" className="shrink-0 text-[10px]">
                   {team.members.length} members

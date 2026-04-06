@@ -114,7 +114,7 @@ export default function Tasks() {
                     <StatusBadge status={t.status} />
                     <PriorityBadge priority={t.priority} />
                   </div>
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{t.description}</p>
+                  <p className="text-xs text-muted-foreground mt-1 truncate">{t.description}</p>
                   <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
                     <span>Project: {getProjectTitle(t.projectId)}</span>
                     <span>Assigned: {getUserName(t.assignedTo)}</span>
