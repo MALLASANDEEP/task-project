@@ -49,6 +49,7 @@ export interface Task {
   description: string;
   projectId: string;
   assignedTo: string;
+  createdBy: string;
   status: TaskStatus;
   priority: Priority;
   comments: Comment[];
