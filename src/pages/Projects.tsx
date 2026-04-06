@@ -13,9 +13,10 @@ import * as api from '@/services/api';
 import { Project, User, Priority } from '@/types';
 import { Plus, Search, Calendar, Users, Pencil, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { extractErrorMessage } from '@/lib/rbac';
 
 export default function Projects() {
-  const { isAdmin, user } = useAuth();
+  const { role, can, user } = useAuth();
   const [projects, setProjects] = useState<Project[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [search, setSearch] = useState('');
@@ -25,11 +26,13 @@ export default function Projects() {
   const { toast } = useToast();
 
   const load = () => {
-    const pFn = isAdmin ? api.getProjects() : api.getProjectsForUser(user!.id);
-    pFn.then(setProjects);
+    const pFn = role === 'TEAM_MEMBER' ? api.getProjectsForUser(user!.id) : api.getProjects();
+    pFn.then(setProjects).catch((error) => {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    });
     api.getUsers().then(setUsers);
   };
-  useEffect(load, [isAdmin, user]);
+  useEffect(load, [role, user]);
 
   const filtered = projects.filter(p => {
     const matchSearch = p.title.toLowerCase().includes(search.toLowerCase());
@@ -38,19 +41,23 @@ export default function Projects() {
   });
 
   const handleDelete = async (id: string) => {
-    await api.deleteProject(id);
-    toast({ title: 'Project deleted' });
-    load();
+    try {
+      await api.deleteProject(id);
+      toast({ title: 'Project deleted' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">{isAdmin ? 'Projects' : 'My Projects'}</h1>
+          <h1 className="text-2xl font-bold">{role === 'TEAM_MEMBER' ? 'My Projects' : 'Projects'}</h1>
           <p className="text-muted-foreground text-sm mt-1">{filtered.length} project{filtered.length !== 1 ? 's' : ''}</p>
         </div>
-        {isAdmin && (
+        {can('projects:create') && (
           <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}>
             <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> New Project</Button></DialogTrigger>
             <DialogContent>
@@ -99,10 +106,14 @@ export default function Projects() {
                 })}
                 {p.assignedUsers.length > 3 && <Badge variant="secondary" className="text-[10px]">+{p.assignedUsers.length - 3}</Badge>}
               </div>
-              {isAdmin && (
+              {(can('projects:update') || can('projects:delete')) && (
                 <div className="flex gap-2 pt-2 border-t">
-                  <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setEditing(p); setDialogOpen(true); }}><Pencil className="h-3 w-3" />Edit</Button>
-                  <Button variant="ghost" size="sm" className="gap-1 text-destructive hover:text-destructive" onClick={() => handleDelete(p.id)}><Trash2 className="h-3 w-3" />Delete</Button>
+                  {can('projects:update') && (
+                    <Button variant="ghost" size="sm" className="gap-1" onClick={() => { setEditing(p); setDialogOpen(true); }}><Pencil className="h-3 w-3" />Edit</Button>
+                  )}
+                  {can('projects:delete') && (
+                    <Button variant="ghost" size="sm" className="gap-1 text-destructive hover:text-destructive" onClick={() => handleDelete(p.id)}><Trash2 className="h-3 w-3" />Delete</Button>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -126,14 +137,18 @@ function ProjectForm({ users, project, onSave }: { users: User[]; project: Proje
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (project) {
-      await api.updateProject(project.id, { title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned });
-      toast({ title: 'Project updated' });
-    } else {
-      await api.createProject({ title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned, createdBy: user!.id });
-      toast({ title: 'Project created' });
+    try {
+      if (project) {
+        await api.updateProject(project.id, { title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned });
+        toast({ title: 'Project updated' });
+      } else {
+        await api.createProject({ title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned, createdBy: user!.id });
+        toast({ title: 'Project created' });
+      }
+      onSave();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
-    onSave();
   };
 
   return (
@@ -153,7 +168,7 @@ function ProjectForm({ users, project, onSave }: { users: User[]; project: Proje
       <div className="space-y-2">
         <Label>Assign Members</Label>
         <div className="flex flex-wrap gap-2">
-          {users.filter(u => u.role === 'user' && u.status === 'active').map(u => (
+          {users.filter(u => u.role === 'TEAM_MEMBER' && u.status === 'active').map(u => (
             <Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>
               {u.name}
             </Badge>

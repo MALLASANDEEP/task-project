@@ -2,7 +2,7 @@ create extension if not exists pgcrypto;
 
 do $$
 begin
-  create type public.user_role as enum ('admin', 'user');
+  create type public.user_role as enum ('ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER');
 exception
   when duplicate_object then null;
 end $$;
@@ -32,7 +32,7 @@ create table if not exists public.profiles (
   id uuid primary key references auth.users (id) on delete cascade,
   name text not null,
   email text not null unique,
-  role public.user_role not null default 'user',
+  role public.user_role not null default 'TEAM_MEMBER',
   status public.user_status not null default 'active',
   avatar_url text,
   created_at timestamptz not null default now()
@@ -126,7 +126,7 @@ as $$
     select 1
     from public.profiles
     where id = auth.uid()
-      and role = 'admin'
+      and role = 'ADMIN'
   );
 $$;
 
@@ -142,7 +142,16 @@ begin
     new.id,
     coalesce(new.raw_user_meta_data ->> 'name', split_part(new.email, '@', 1)),
     new.email,
-    coalesce((new.raw_user_meta_data ->> 'role')::public.user_role, 'user'::public.user_role),
+    coalesce(
+      case upper(coalesce(new.raw_user_meta_data ->> 'role', ''))
+        when 'ADMIN' then 'ADMIN'::public.user_role
+        when 'PROJECT_MANAGER' then 'PROJECT_MANAGER'::public.user_role
+        when 'TEAM_MEMBER' then 'TEAM_MEMBER'::public.user_role
+        when 'VIEWER' then 'VIEWER'::public.user_role
+        else null
+      end,
+      'TEAM_MEMBER'::public.user_role
+    ),
     'active'::public.user_status,
     new.raw_user_meta_data ->> 'avatar_url'
   )

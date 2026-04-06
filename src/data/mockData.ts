@@ -1,11 +1,11 @@
 import { User, Project, Task, Notification, Team } from '@/types';
 
 export const mockUsers: User[] = [
-  { id: 'u1', name: 'Aarav Sharma', email: 'admin@taskflow.io', role: 'admin', status: 'active', avatar: '', createdAt: '2025-01-10T08:00:00Z' },
-  { id: 'u2', name: 'Priya Patel', email: 'priya@taskflow.io', role: 'user', status: 'active', avatar: '', createdAt: '2025-02-14T10:30:00Z' },
-  { id: 'u3', name: 'Rohan Mehta', email: 'rohan@taskflow.io', role: 'user', status: 'active', avatar: '', createdAt: '2025-03-01T09:15:00Z' },
-  { id: 'u4', name: 'Sneha Gupta', email: 'sneha@taskflow.io', role: 'user', status: 'inactive', avatar: '', createdAt: '2025-03-20T14:00:00Z' },
-  { id: 'u5', name: 'Vikram Singh', email: 'vikram@taskflow.io', role: 'user', status: 'active', avatar: '', createdAt: '2025-04-05T11:45:00Z' },
+  { id: 'u1', name: 'Aarav Sharma', email: 'admin@taskflow.io', role: 'ADMIN', status: 'active', avatar: '', createdAt: '2025-01-10T08:00:00Z' },
+  { id: 'u2', name: 'Priya Patel', email: 'priya@taskflow.io', role: 'PROJECT_MANAGER', status: 'active', avatar: '', createdAt: '2025-02-14T10:30:00Z' },
+  { id: 'u3', name: 'Rohan Mehta', email: 'rohan@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-03-01T09:15:00Z' },
+  { id: 'u4', name: 'Sneha Gupta', email: 'sneha@taskflow.io', role: 'VIEWER', status: 'active', avatar: '', createdAt: '2025-03-20T14:00:00Z' },
+  { id: 'u5', name: 'Vikram Singh', email: 'vikram@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-04-05T11:45:00Z' },
 ];
 
 export const mockProjects: Project[] = [
@@ -61,4 +61,7 @@ export const mockNotifications: Notification[] = [
 export const mockCredentials = [
   { email: 'admin@taskflow.io', password: 'admin123', userId: 'u1' },
   { email: 'priya@taskflow.io', password: 'user123', userId: 'u2' },
+  { email: 'rohan@taskflow.io', password: 'user123', userId: 'u3' },
+  { email: 'sneha@taskflow.io', password: 'user123', userId: 'u4' },
+  { email: 'vikram@taskflow.io', password: 'user123', userId: 'u5' },
 ];

@@ -78,8 +78,10 @@ export default function LoginPage() {
 
         <div className="rounded-lg border bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
           <p className="font-medium">Demo Credentials</p>
-          <p>Admin: admin@taskflow.io / admin123</p>
-          <p>User: priya@taskflow.io / user123</p>
+          <p>ADMIN: admin@taskflow.io / admin123</p>
+          <p>PROJECT_MANAGER: priya@taskflow.io / user123</p>
+          <p>TEAM_MEMBER: rohan@taskflow.io / user123</p>
+          <p>VIEWER: sneha@taskflow.io / user123</p>
         </div>
       </div>
     </div>

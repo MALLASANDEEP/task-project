@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User, AuthState } from '@/types';
 import * as api from '@/services/api';
+import { hasPermission, Permission } from '@/lib/rbac';
 
 interface AuthContextType extends AuthState {
   login: (email: string, password: string) => Promise<boolean>;
@@ -8,6 +9,9 @@ interface AuthContextType extends AuthState {
   logout: () => void;
   updateProfile: (data: Partial<User>) => void;
   isAdmin: boolean;
+  role: User['role'] | null;
+  hasRole: (roles: User['role'] | User['role'][]) => boolean;
+  can: (permission: Permission) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | null>(null);
@@ -32,17 +36,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginFn = useCallback(async (email: string, password: string) => {
     const result = await api.login(email, password);
     if (!result) return false;
+    api.setActiveUserId(result.user.id);
     setState({ user: result.user, token: result.token, isAuthenticated: true });
     return true;
   }, []);
 
   const registerFn = useCallback(async (name: string, email: string, password: string) => {
     const result = await api.register(name, email, password);
+    api.setActiveUserId(result.user.id);
     setState({ user: result.user, token: result.token, isAuthenticated: true });
     return true;
   }, []);
 
   const logout = useCallback(() => {
+    api.setActiveUserId(null);
     setState({ user: null, token: null, isAuthenticated: false });
   }, []);
 
@@ -50,8 +57,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState(prev => prev.user ? { ...prev, user: { ...prev.user, ...data } } : prev);
   }, []);
 
+  useEffect(() => {
+    api.setActiveUserId(state.user?.id || null);
+  }, [state.user?.id]);
+
+  const role = state.user?.role || null;
+  const isAdmin = role === 'ADMIN';
+
+  const hasRole = useCallback((roles: User['role'] | User['role'][]) => {
+    if (!role) return false;
+    return Array.isArray(roles) ? roles.includes(role) : role === roles;
+  }, [role]);
+
+  const can = useCallback((permission: Permission) => {
+    if (!role) return false;
+    return hasPermission(role, permission);
+  }, [role]);
+
   return (
-    <AuthContext.Provider value={{ ...state, login: loginFn, register: registerFn, logout, updateProfile, isAdmin: state.user?.role === 'admin' }}>
+    <AuthContext.Provider value={{ ...state, login: loginFn, register: registerFn, logout, updateProfile, isAdmin, role, hasRole, can }}>
       {children}
     </AuthContext.Provider>
   );

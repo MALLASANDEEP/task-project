@@ -33,10 +33,10 @@ const App = () => (
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
-              <Route path="/teams" element={<ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
+              <Route path="/teams" element={<ProtectedRoute requiredPermission="teams:manage"><Teams /></ProtectedRoute>} />
               <Route path="/tasks" element={<Tasks />} />
-              <Route path="/users" element={<ProtectedRoute adminOnly><UsersManagement /></ProtectedRoute>} />
-              <Route path="/admin-provider" element={<ProtectedRoute adminOnly><AdminTaskProvider /></ProtectedRoute>} />
+              <Route path="/users" element={<ProtectedRoute requiredPermission="users:manage"><UsersManagement /></ProtectedRoute>} />
+              <Route path="/admin-provider" element={<ProtectedRoute requiredPermission="projects:create"><AdminTaskProvider /></ProtectedRoute>} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />

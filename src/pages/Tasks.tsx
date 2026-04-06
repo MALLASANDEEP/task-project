@@ -13,9 +13,10 @@ import * as api from '@/services/api';
 import { Task, User, Project, Priority, TaskStatus } from '@/types';
 import { Plus, Search, MessageSquare, Pencil, Trash2, Send } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { extractErrorMessage } from '@/lib/rbac';
 
 export default function Tasks() {
-  const { isAdmin, user } = useAuth();
+  const { can, role, user } = useAuth();
   const [tasks, setTasks] = useState<Task[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -28,12 +29,15 @@ export default function Tasks() {
   const { toast } = useToast();
 
   const load = () => {
-    const tFn = isAdmin ? api.getTasks() : api.getTasksForUser(user!.id);
-    tFn.then(setTasks);
+    api.getTasks()
+      .then(setTasks)
+      .catch((error) => {
+        toast({ title: extractErrorMessage(error), variant: 'destructive' });
+      });
     api.getUsers().then(setUsers);
     api.getProjects().then(setProjects);
   };
-  useEffect(load, [isAdmin, user]);
+  useEffect(load, [role, user]);
 
   const filtered = tasks.filter(t => {
     const s = search.toLowerCase();
@@ -44,15 +48,23 @@ export default function Tasks() {
   });
 
   const handleStatusChange = async (id: string, status: TaskStatus) => {
-    await api.updateTaskStatus(id, status);
-    toast({ title: 'Task status updated' });
-    load();
+    try {
+      await api.updateTaskStatus(id, status);
+      toast({ title: 'Task status updated' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await api.deleteTask(id);
-    toast({ title: 'Task deleted' });
-    load();
+    try {
+      await api.deleteTask(id);
+      toast({ title: 'Task deleted' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unknown';
@@ -62,10 +74,10 @@ export default function Tasks() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">{isAdmin ? 'All Tasks' : 'My Tasks'}</h1>
+          <h1 className="text-2xl font-bold">{role === 'TEAM_MEMBER' ? 'My Tasks' : 'Tasks'}</h1>
           <p className="text-muted-foreground text-sm mt-1">{filtered.length} task{filtered.length !== 1 ? 's' : ''}</p>
         </div>
-        {isAdmin && (
+        {can('tasks:create') && (
           <Dialog open={dialogOpen} onOpenChange={o => { setDialogOpen(o); if (!o) setEditing(null); }}>
             <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> New Task</Button></DialogTrigger>
             <DialogContent className="max-w-lg">
@@ -111,19 +123,25 @@ export default function Tasks() {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  {(!isAdmin) && t.status !== 'completed' && (
+                  {(role === 'TEAM_MEMBER') && t.status !== 'completed' && (
                     <Select value={t.status} onValueChange={v => handleStatusChange(t.id, v as TaskStatus)}>
                       <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue /></SelectTrigger>
                       <SelectContent><SelectItem value="pending">Pending</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectContent>
                     </Select>
                   )}
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCommentTask(t)}>
-                    <MessageSquare className="h-4 w-4" />
-                  </Button>
-                  {isAdmin && (
+                  {can('comments:add') && (
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCommentTask(t)}>
+                      <MessageSquare className="h-4 w-4" />
+                    </Button>
+                  )}
+                  {(can('tasks:update') || can('tasks:delete')) && (
                     <>
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(t); setDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
+                      {can('tasks:update') && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(t); setDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button>
+                      )}
+                      {can('tasks:delete') && (
+                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
+                      )}
                     </>
                   )}
                 </div>
@@ -144,10 +162,11 @@ export default function Tasks() {
 }
 
 function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: Project[]; task: Task | null; onSave: () => void }) {
+  const { can, user } = useAuth();
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || '');
   const [projectId, setProjectId] = useState(task?.projectId || '');
-  const [assignedTo, setAssignedTo] = useState(task?.assignedTo || '');
+  const [assignedTo, setAssignedTo] = useState(task?.assignedTo || user?.id || '');
   const [priority, setPriority] = useState<Priority>(task?.priority || 'medium');
   const [status, setStatus] = useState<TaskStatus>(task?.status || 'pending');
   const [dueDate, setDueDate] = useState(task?.dueDate?.split('T')[0] || '');
@@ -155,14 +174,18 @@ function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: 
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (task) {
-      await api.updateTask(task.id, { title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
-      toast({ title: 'Task updated' });
-    } else {
-      await api.createTask({ title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
-      toast({ title: 'Task created' });
+    try {
+      if (task) {
+        await api.updateTask(task.id, { title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
+        toast({ title: 'Task updated' });
+      } else {
+        await api.createTask({ title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
+        toast({ title: 'Task created' });
+      }
+      onSave();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
-    onSave();
   };
 
   return (
@@ -179,9 +202,9 @@ function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: 
         </div>
         <div className="space-y-2">
           <Label>Assign To</Label>
-          <Select value={assignedTo} onValueChange={setAssignedTo}>
+          <Select value={assignedTo} onValueChange={setAssignedTo} disabled={!can('tasks:assign')}>
             <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-            <SelectContent>{users.filter(u => u.status === 'active').map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+            <SelectContent>{users.filter(u => u.status === 'active' && u.role === 'TEAM_MEMBER').map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>
@@ -213,10 +236,14 @@ function CommentsSection({ task, users, userId, onCommentAdded }: { task: Task; 
 
   const handleAdd = async () => {
     if (!comment.trim()) return;
-    await api.addComment(task.id, userId, comment.trim());
-    setComment('');
-    toast({ title: 'Comment added' });
-    onCommentAdded();
+    try {
+      await api.addComment(task.id, userId, comment.trim());
+      setComment('');
+      toast({ title: 'Comment added' });
+      onCommentAdded();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   return (

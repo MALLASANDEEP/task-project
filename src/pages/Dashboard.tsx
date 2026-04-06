@@ -5,11 +5,14 @@ import { Badge } from '@/components/ui/badge';
 import * as api from '@/services/api';
 import { Task, Project } from '@/types';
 import { FolderKanban, ListChecks, Users, Clock, TrendingUp, CheckCircle2 } from 'lucide-react';
+import { roleLabel } from '@/lib/rbac';
 
 export default function Dashboard() {
-  const { isAdmin, user } = useAuth();
+  const { role, user } = useAuth();
 
-  if (isAdmin) return <AdminDashboard />;
+  if (role === 'ADMIN' || role === 'PROJECT_MANAGER' || role === 'VIEWER') {
+    return <InsightsDashboard role={role} />;
+  }
   return <UserDashboard userId={user!.id} />;
 }
 
@@ -29,7 +32,7 @@ function StatCard({ title, value, icon: Icon, color }: { title: string; value: n
   );
 }
 
-function AdminDashboard() {
+function InsightsDashboard({ role }: { role: 'ADMIN' | 'PROJECT_MANAGER' | 'VIEWER' }) {
   const [stats, setStats] = useState<any>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -45,8 +48,8 @@ function AdminDashboard() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold">Admin Dashboard</h1>
-        <p className="text-muted-foreground text-sm mt-1">Overview of your team's progress</p>
+        <h1 className="text-2xl font-bold">{roleLabel(role)} Dashboard</h1>
+        <p className="text-muted-foreground text-sm mt-1">Overview of project and task progress</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

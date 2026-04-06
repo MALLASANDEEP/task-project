@@ -6,9 +6,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
+import { roleLabel } from '@/lib/rbac';
 
 export default function SettingsPage() {
   const { user, updateProfile } = useAuth();
+  const isViewer = user?.role === 'VIEWER';
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
   const [currentPw, setCurrentPw] = useState('');
@@ -18,12 +20,20 @@ export default function SettingsPage() {
 
   const handleProfile = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isViewer) {
+      toast({ title: 'VIEWER role is read-only', variant: 'destructive' });
+      return;
+    }
     updateProfile({ name, email });
     toast({ title: 'Profile updated' });
   };
 
   const handlePassword = (e: React.FormEvent) => {
     e.preventDefault();
+    if (isViewer) {
+      toast({ title: 'VIEWER role is read-only', variant: 'destructive' });
+      return;
+    }
     if (newPw !== confirmPw) {
       toast({ title: 'Passwords do not match', variant: 'destructive' });
       return;
@@ -48,9 +58,9 @@ export default function SettingsPage() {
             <div className="space-y-2"><Label>Email</Label><Input type="email" value={email} onChange={e => setEmail(e.target.value)} /></div>
             <div className="space-y-2">
               <Label>Role</Label>
-              <Input value={user?.role === 'admin' ? 'Administrator' : 'Team Member'} disabled />
+              <Input value={user?.role ? roleLabel(user.role) : 'Unknown'} disabled />
             </div>
-            <Button type="submit">Save Changes</Button>
+            <Button type="submit" disabled={isViewer}>Save Changes</Button>
           </form>
         </CardContent>
       </Card>
@@ -63,7 +73,7 @@ export default function SettingsPage() {
             <Separator />
             <div className="space-y-2"><Label>New Password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} required minLength={6} /></div>
             <div className="space-y-2"><Label>Confirm New Password</Label><Input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required /></div>
-            <Button type="submit">Update Password</Button>
+            <Button type="submit" disabled={isViewer}>Update Password</Button>
           </form>
         </CardContent>
       </Card>

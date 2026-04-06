@@ -12,6 +12,7 @@ import * as api from '@/services/api';
 import { Project, Team, User } from '@/types';
 import { FolderKanban, Plus, Search, Trash2, Users } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { extractErrorMessage } from '@/lib/rbac';
 
 export default function Teams() {
   const { user } = useAuth();
@@ -24,7 +25,9 @@ export default function Teams() {
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
 
   const load = () => {
-    api.getTeams().then(setTeams);
+    api.getTeams().then(setTeams).catch((error) => {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    });
     api.getUsers().then(setUsers);
     api.getProjects().then(setProjects);
   };
@@ -33,7 +36,10 @@ export default function Teams() {
     load();
   }, []);
 
-  const activeUsers = useMemo(() => users.filter((teamMember) => teamMember.status === 'active'), [users]);
+  const activeUsers = useMemo(
+    () => users.filter((teamMember) => teamMember.status === 'active' && teamMember.role === 'TEAM_MEMBER'),
+    [users],
+  );
 
   const filteredTeams = teams.filter((team) => {
     const query = search.toLowerCase();
@@ -44,9 +50,13 @@ export default function Teams() {
   const projectTitle = (id: string) => projects.find((project) => project.id === id)?.title || 'Unknown';
 
   const handleDelete = async (id: string) => {
-    await api.deleteTeam(id);
-    toast({ title: 'Team deleted' });
-    load();
+    try {
+      await api.deleteTeam(id);
+      toast({ title: 'Team deleted' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   const totals = {
@@ -237,21 +247,25 @@ function TeamForm({
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
 
-    if (team) {
-      await api.updateTeam(team.id, { name, description, members, projects: linkedProjects });
-      toast({ title: 'Team updated' });
-    } else {
-      await api.createTeam({
-        name,
-        description,
-        createdBy: currentUserId,
-        members,
-        projects: linkedProjects,
-      });
-      toast({ title: 'Team created' });
-    }
+    try {
+      if (team) {
+        await api.updateTeam(team.id, { name, description, members, projects: linkedProjects });
+        toast({ title: 'Team updated' });
+      } else {
+        await api.createTeam({
+          name,
+          description,
+          createdBy: currentUserId,
+          members,
+          projects: linkedProjects,
+        });
+        toast({ title: 'Team created' });
+      }
 
-    onSave();
+      onSave();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   return (

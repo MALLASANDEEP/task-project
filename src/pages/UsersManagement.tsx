@@ -11,6 +11,7 @@ import * as api from '@/services/api';
 import { User, UserRole, UserStatus } from '@/types';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { extractErrorMessage, roleLabel } from '@/lib/rbac';
 
 export default function UsersPage() {
   const [users, setUsers] = useState<User[]>([]);
@@ -26,15 +27,23 @@ export default function UsersPage() {
 
   const toggleStatus = async (u: User) => {
     const newStatus: UserStatus = u.status === 'active' ? 'inactive' : 'active';
-    await api.updateUser(u.id, { status: newStatus });
-    toast({ title: `User ${newStatus === 'active' ? 'activated' : 'deactivated'}` });
-    load();
+    try {
+      await api.updateUser(u.id, { status: newStatus });
+      toast({ title: `User ${newStatus === 'active' ? 'activated' : 'deactivated'}` });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await api.deleteUser(id);
-    toast({ title: 'User deleted' });
-    load();
+    try {
+      await api.deleteUser(id);
+      toast({ title: 'User deleted' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   return (
@@ -75,7 +84,7 @@ export default function UsersPage() {
               <TableRow key={u.id}>
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
-                <TableCell><Badge variant={u.role === 'admin' ? 'default' : 'secondary'} className="capitalize text-[10px]">{u.role}</Badge></TableCell>
+                <TableCell><Badge variant={u.role === 'ADMIN' ? 'default' : 'secondary'} className="text-[10px]">{roleLabel(u.role)}</Badge></TableCell>
                 <TableCell>
                   <div className="flex items-center gap-2">
                     <Switch checked={u.status === 'active'} onCheckedChange={() => toggleStatus(u)} />
@@ -99,20 +108,24 @@ export default function UsersPage() {
 function UserForm({ user, onSave }: { user: User | null; onSave: () => void }) {
   const [name, setName] = useState(user?.name || '');
   const [email, setEmail] = useState(user?.email || '');
-  const [role, setRole] = useState<UserRole>(user?.role || 'user');
+  const [role, setRole] = useState<UserRole>(user?.role || 'TEAM_MEMBER');
   const [status, setStatus] = useState<UserStatus>(user?.status || 'active');
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (user) {
-      await api.updateUser(user.id, { name, email, role, status });
-      toast({ title: 'User updated' });
-    } else {
-      await api.createUser({ name, email, role, status });
-      toast({ title: 'User created' });
+    try {
+      if (user) {
+        await api.updateUser(user.id, { name, email, role, status });
+        toast({ title: 'User updated' });
+      } else {
+        await api.createUser({ name, email, role, status });
+        toast({ title: 'User created' });
+      }
+      onSave();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
-    onSave();
   };
 
   return (
@@ -124,7 +137,12 @@ function UserForm({ user, onSave }: { user: User | null; onSave: () => void }) {
           <Label>Role</Label>
           <Select value={role} onValueChange={v => setRole(v as UserRole)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="admin">Admin</SelectItem><SelectItem value="user">User</SelectItem></SelectContent>
+            <SelectContent>
+              <SelectItem value="ADMIN">ADMIN</SelectItem>
+              <SelectItem value="PROJECT_MANAGER">PROJECT_MANAGER</SelectItem>
+              <SelectItem value="TEAM_MEMBER">TEAM_MEMBER</SelectItem>
+              <SelectItem value="VIEWER">VIEWER</SelectItem>
+            </SelectContent>
           </Select>
         </div>
         <div className="space-y-2">

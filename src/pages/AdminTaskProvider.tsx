@@ -12,6 +12,7 @@ import { User, Project, Priority } from '@/types';
 import * as api from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar, FolderKanban, UserPlus } from 'lucide-react';
+import { extractErrorMessage } from '@/lib/rbac';
 
 const NEW_USER_WINDOW_DAYS = 45;
 
@@ -49,7 +50,7 @@ export default function AdminTaskProvider() {
   }, [projects]);
 
   const activeUsers = useMemo(
-    () => users.filter((u) => u.role === 'user' && u.status === 'active'),
+    () => users.filter((u) => u.role === 'TEAM_MEMBER' && u.status === 'active'),
     [users],
   );
 
@@ -85,12 +86,16 @@ export default function AdminTaskProvider() {
       return;
     }
 
-    await api.updateProject(project.id, {
-      assignedUsers: [...project.assignedUsers, userId],
-    });
+    try {
+      await api.updateProject(project.id, {
+        assignedUsers: [...project.assignedUsers, userId],
+      });
 
-    toast({ title: 'User assigned to project' });
-    load();
+      toast({ title: 'User assigned to project' });
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   const handleCreateAndAssign = async (e: React.FormEvent) => {
@@ -100,23 +105,27 @@ export default function AdminTaskProvider() {
       return;
     }
 
-    await api.createProject({
-      title,
-      description,
-      priority,
-      deadline: new Date(deadline).toISOString(),
-      assignedUsers: [assignee],
-      createdBy: user!.id,
-    });
+    try {
+      await api.createProject({
+        title,
+        description,
+        priority,
+        deadline: new Date(deadline).toISOString(),
+        assignedUsers: [assignee],
+        createdBy: user!.id,
+      });
 
-    toast({ title: 'New project created and assigned' });
-    setDialogOpen(false);
-    setTitle('');
-    setDescription('');
-    setPriority('medium');
-    setDeadline('');
-    setAssignee('');
-    load();
+      toast({ title: 'New project created and assigned' });
+      setDialogOpen(false);
+      setTitle('');
+      setDescription('');
+      setPriority('medium');
+      setDeadline('');
+      setAssignee('');
+      load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   return (

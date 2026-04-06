@@ -5,32 +5,27 @@ import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter, useSidebar,
 } from '@/components/ui/sidebar';
-import { LayoutDashboard, FolderKanban, ListChecks, Users, Settings, User, Layers, LogOut, UserPlus } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, ListChecks, Users, Settings, Layers, LogOut, UserPlus } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { UserRole } from '@/types';
+import { roleLabel } from '@/lib/rbac';
 
-const adminMenu = [
-  { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-  { title: 'Projects', url: '/projects', icon: FolderKanban },
-  { title: 'Teams', url: '/teams', icon: Users },
-  { title: 'Tasks', url: '/tasks', icon: ListChecks },
-  { title: 'Users', url: '/users', icon: Users },
-  { title: 'Task Provider', url: '/admin-provider', icon: UserPlus },
-  { title: 'Settings', url: '/settings', icon: Settings },
-];
-
-const userMenu = [
-  { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
-  { title: 'My Projects', url: '/projects', icon: FolderKanban },
-  { title: 'My Tasks', url: '/tasks', icon: ListChecks },
-  { title: 'Profile', url: '/settings', icon: User },
+const menuItems: Array<{ title: string; url: string; icon: any; roles: UserRole[] }> = [
+  { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
+  { title: 'Projects', url: '/projects', icon: FolderKanban, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
+  { title: 'Tasks', url: '/tasks', icon: ListChecks, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
+  { title: 'Teams', url: '/teams', icon: Users, roles: ['ADMIN'] },
+  { title: 'Users', url: '/users', icon: Users, roles: ['ADMIN'] },
+  { title: 'Task Provider', url: '/admin-provider', icon: UserPlus, roles: ['ADMIN'] },
+  { title: 'Settings', url: '/settings', icon: Settings, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
 ];
 
 export function AppSidebar() {
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, hasRole, logout } = useAuth();
   const { state } = useSidebar();
   const collapsed = state === 'collapsed';
   const location = useLocation();
-  const menu = isAdmin ? adminMenu : userMenu;
+  const menu = menuItems.filter(item => hasRole(item.roles));
 
   return (
     <Sidebar collapsible="icon" className="border-r-0">
@@ -42,7 +37,7 @@ export function AppSidebar() {
       <SidebarContent className="pt-2">
         <SidebarGroup>
           <SidebarGroupLabel className="text-sidebar-muted text-[10px] uppercase tracking-wider">
-            {isAdmin ? 'Administration' : 'Navigation'}
+            {isAdmin ? 'Administration' : 'Workspace'}
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -66,6 +61,7 @@ export function AppSidebar() {
           <div className="mb-2 px-1">
             <p className="text-sm font-medium text-sidebar-foreground truncate">{user.name}</p>
             <p className="text-xs text-sidebar-muted truncate">{user.email}</p>
+            <p className="text-[10px] text-sidebar-muted uppercase tracking-wide mt-1">{roleLabel(user.role)}</p>
           </div>
         )}
         <Button variant="ghost" size={collapsed ? 'icon' : 'default'} className="w-full justify-start text-sidebar-foreground hover:bg-sidebar-accent/60 hover:text-sidebar-accent-foreground" onClick={logout}>
