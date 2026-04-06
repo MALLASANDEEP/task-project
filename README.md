@@ -37,9 +37,7 @@ Unauthorized actions return `403 Forbidden` from the API layer and are surfaced 
 ## Supabase Setup
 
 1. Create a Supabase project.
-2. Copy the SQL from [supabase/migrations/001_init_schema.sql](supabase/migrations/001_init_schema.sql) into the SQL editor.
-3. Run [supabase/migrations/002_seed_demo_auth.sql](supabase/migrations/002_seed_demo_auth.sql) to create demo logins for ADMIN, PROJECT_MANAGER, TEAM_MEMBER, and VIEWER.
-4. Run [supabase/migrations/003_seed_demo_data.sql](supabase/migrations/003_seed_demo_data.sql) to populate matching demo projects, teams, tasks, and notifications.
+2. Copy the SQL from [supabase/taskflow_full_setup.sql](supabase/taskflow_full_setup.sql) into the SQL editor.
 5. Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` to your local environment from [`.env.example`](.env.example).
 6. Use [src/lib/supabase.ts](src/lib/supabase.ts) as the client entry point when you start wiring the app to the database.
 
