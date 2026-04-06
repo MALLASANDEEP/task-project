@@ -11,12 +11,13 @@
  *   }
  */
 
-import { mockUsers, mockProjects, mockTasks, mockNotifications, mockCredentials } from '@/data/mockData';
-import { User, Project, Task, Notification, TaskStatus, UserRole, UserStatus, Priority, Comment } from '@/types';
+import { mockUsers, mockProjects, mockTeams, mockTasks, mockNotifications, mockCredentials } from '@/data/mockData';
+import { User, Project, Team, Task, Notification, TaskStatus, UserRole, UserStatus, Priority, Comment } from '@/types';
 
 // Mutable copies for CRUD operations
 let users = [...mockUsers];
 let projects = [...mockProjects];
+let teams = [...mockTeams];
 let tasks = [...mockTasks];
 let notifications = [...mockNotifications];
 
@@ -64,6 +65,41 @@ export async function updateProject(id: string, data: Partial<Project>): Promise
   return projects.find(p => p.id === id)!;
 }
 export async function deleteProject(id: string): Promise<void> { projects = projects.filter(p => p.id !== id); }
+
+// ── Teams ────────────────────────────────────────────
+export async function getTeams(): Promise<Team[]> { return teams; }
+export async function getTeamById(id: string): Promise<Team | undefined> { return teams.find(team => team.id === id); }
+
+function attachTeamProjects(team: Pick<Team, 'members' | 'projects'>) {
+  const projectIds = new Set(team.projects);
+  const memberIds = team.members;
+
+  projects = projects.map((project) => {
+    if (!projectIds.has(project.id)) return project;
+    return {
+      ...project,
+      assignedUsers: Array.from(new Set([...project.assignedUsers, ...memberIds])),
+    };
+  });
+}
+
+export async function createTeam(data: Omit<Team, 'id' | 'createdAt'>): Promise<Team> {
+  const team: Team = { id: `team${Date.now()}`, ...data, createdAt: new Date().toISOString() };
+  teams.push(team);
+  attachTeamProjects(team);
+  return team;
+}
+
+export async function updateTeam(id: string, data: Partial<Team>): Promise<Team> {
+  teams = teams.map(team => team.id === id ? { ...team, ...data } : team);
+  const updated = teams.find(team => team.id === id)!;
+  attachTeamProjects(updated);
+  return updated;
+}
+
+export async function deleteTeam(id: string): Promise<void> {
+  teams = teams.filter(team => team.id !== id);
+}
 
 // ── Tasks ─────────────────────────────────────────────
 export async function getTasks(): Promise<Task[]> { return tasks; }

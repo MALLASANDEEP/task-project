@@ -25,6 +25,16 @@ export interface Project {
   createdAt: string;
 }
 
+export interface Team {
+  id: string;
+  name: string;
+  description: string;
+  createdBy: string;
+  members: string[];
+  projects: string[];
+  createdAt: string;
+}
+
 export interface Comment {
   id: string;
   taskId: string;

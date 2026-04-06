@@ -10,6 +10,7 @@ import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Projects from "./pages/Projects";
+import Teams from "./pages/Teams";
 import Tasks from "./pages/Tasks";
 import UsersManagement from "./pages/UsersManagement";
 import AdminTaskProvider from "./pages/AdminTaskProvider";
@@ -32,6 +33,7 @@ const App = () => (
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/projects" element={<Projects />} />
+              <Route path="/teams" element={<ProtectedRoute adminOnly><Teams /></ProtectedRoute>} />
               <Route path="/tasks" element={<Tasks />} />
               <Route path="/users" element={<ProtectedRoute adminOnly><UsersManagement /></ProtectedRoute>} />
               <Route path="/admin-provider" element={<ProtectedRoute adminOnly><AdminTaskProvider /></ProtectedRoute>} />

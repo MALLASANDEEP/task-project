@@ -1,4 +1,4 @@
-import { User, Project, Task, Notification } from '@/types';
+import { User, Project, Task, Notification, Team } from '@/types';
 
 export const mockUsers: User[] = [
   { id: 'u1', name: 'Aarav Sharma', email: 'admin@taskflow.io', role: 'admin', status: 'active', avatar: '', createdAt: '2025-01-10T08:00:00Z' },
@@ -12,6 +12,27 @@ export const mockProjects: Project[] = [
   { id: 'p1', title: 'Website Redesign', description: 'Complete overhaul of the company website with modern design and improved UX.', createdBy: 'u1', assignedUsers: ['u2', 'u3', 'u5'], deadline: '2026-06-30T00:00:00Z', priority: 'high', createdAt: '2025-05-01T08:00:00Z' },
   { id: 'p2', title: 'Mobile App v2', description: 'Build version 2 of the mobile application with offline support and push notifications.', createdBy: 'u1', assignedUsers: ['u3', 'u5'], deadline: '2026-08-15T00:00:00Z', priority: 'medium', createdAt: '2025-06-15T10:00:00Z' },
   { id: 'p3', title: 'API Migration', description: 'Migrate legacy REST APIs to GraphQL with improved caching and documentation.', createdBy: 'u1', assignedUsers: ['u2', 'u4'], deadline: '2026-05-20T00:00:00Z', priority: 'low', createdAt: '2025-07-20T12:00:00Z' },
+];
+
+export const mockTeams: Team[] = [
+  {
+    id: 'team-1',
+    name: 'Platform Launch Squad',
+    description: 'Core delivery team for the redesign and platform rollout.',
+    createdBy: 'u1',
+    members: ['u2', 'u3', 'u5'],
+    projects: ['p1', 'p2'],
+    createdAt: '2025-08-01T09:00:00Z',
+  },
+  {
+    id: 'team-2',
+    name: 'API Migration Crew',
+    description: 'Focused group handling the GraphQL migration workstream.',
+    createdBy: 'u1',
+    members: ['u2', 'u4'],
+    projects: ['p3'],
+    createdAt: '2025-08-12T13:30:00Z',
+  },
 ];
 
 export const mockTasks: Task[] = [

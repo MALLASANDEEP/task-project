@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 const adminMenu = [
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard },
   { title: 'Projects', url: '/projects', icon: FolderKanban },
+  { title: 'Teams', url: '/teams', icon: Users },
   { title: 'Tasks', url: '/tasks', icon: ListChecks },
   { title: 'Users', url: '/users', icon: Users },
   { title: 'Task Provider', url: '/admin-provider', icon: UserPlus },
