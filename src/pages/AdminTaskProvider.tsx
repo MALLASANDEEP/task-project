@@ -30,9 +30,20 @@ export default function AdminTaskProvider() {
   const [deadline, setDeadline] = useState('');
   const [assignee, setAssignee] = useState('');
 
-  const load = () => {
-    api.getUsers().then(setUsers);
-    api.getProjects().then(setProjects);
+  const load = async () => {
+    try {
+      const usersData = await api.getUsers();
+      setUsers(usersData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+
+    try {
+      const projectsData = await api.getProjects();
+      setProjects(projectsData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   useEffect(() => {

@@ -38,9 +38,30 @@ function InsightsDashboard({ role }: { role: 'ADMIN' | 'PROJECT_MANAGER' | 'VIEW
   const [projects, setProjects] = useState<Project[]>([]);
 
   useEffect(() => {
-    api.getDashboardStats().then(setStats);
-    api.getTasks().then(setTasks);
-    api.getProjects().then(setProjects);
+    const load = async () => {
+      try {
+        const statsData = await api.getDashboardStats();
+        setStats(statsData);
+      } catch (error) {
+        setStats(null);
+      }
+
+      try {
+        const tasksData = await api.getTasks();
+        setTasks(tasksData);
+      } catch {
+        setTasks([]);
+      }
+
+      try {
+        const projectsData = await api.getProjects();
+        setProjects(projectsData);
+      } catch {
+        setProjects([]);
+      }
+    };
+
+    load();
   }, []);
 
   if (!stats) return null;

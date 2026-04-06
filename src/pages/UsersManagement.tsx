@@ -20,7 +20,14 @@ export default function UsersPage() {
   const [editing, setEditing] = useState<User | null>(null);
   const { toast } = useToast();
 
-  const load = () => api.getUsers().then(setUsers);
+  const load = async () => {
+    try {
+      const usersData = await api.getUsers();
+      setUsers(usersData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+  };
   useEffect(() => { load(); }, []);
 
   const filtered = users.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()));

@@ -13,9 +13,23 @@ export function AppHeader() {
   const [notifications, setNotifications] = useState<Notification[]>([]);
 
   useEffect(() => {
-    if (user) {
-      api.getNotificationsForUser(user.id).then(setNotifications);
+    let active = true;
+    if (!user) {
+      setNotifications([]);
+      return;
     }
+
+    api.getNotificationsForUser(user.id)
+      .then((data) => {
+        if (active) setNotifications(data);
+      })
+      .catch(() => {
+        if (active) setNotifications([]);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [user]);
 
   const unreadCount = notifications.filter(n => !n.read).length;

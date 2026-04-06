@@ -3,7 +3,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -24,12 +24,27 @@ export default function Teams() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
 
-  const load = () => {
-    api.getTeams().then(setTeams).catch((error) => {
+  const load = async () => {
+    try {
+      const teamsData = await api.getTeams();
+      setTeams(teamsData);
+    } catch (error) {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    });
-    api.getUsers().then(setUsers);
-    api.getProjects().then(setProjects);
+    }
+
+    try {
+      const usersData = await api.getUsers();
+      setUsers(usersData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+
+    try {
+      const projectsData = await api.getProjects();
+      setProjects(projectsData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
 
   useEffect(() => {
@@ -91,6 +106,7 @@ export default function Teams() {
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>{editingTeam ? 'Edit Team' : 'Create Team'}</DialogTitle>
+              <DialogDescription>{editingTeam ? 'Update the team details and members below.' : 'Create a new team and assign members to shared projects.'}</DialogDescription>
             </DialogHeader>
             <TeamForm
               team={editingTeam}

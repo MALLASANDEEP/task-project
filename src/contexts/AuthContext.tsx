@@ -19,10 +19,12 @@ const AuthContext = createContext<AuthContextType | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>(() => {
     const stored = localStorage.getItem('taskflow_auth');
-    if (stored) {
-      try { return JSON.parse(stored); } catch { /* ignore */ }
-    }
-    return { user: null, token: null, isAuthenticated: false };
+    const initialState = stored
+      ? (() => { try { return JSON.parse(stored); } catch { return { user: null, token: null, isAuthenticated: false }; } })()
+      : { user: null, token: null, isAuthenticated: false };
+
+    api.setActiveUserId(initialState.user?.id || null);
+    return initialState;
   });
 
   useEffect(() => {

@@ -25,14 +25,22 @@ export default function Projects() {
   const [editing, setEditing] = useState<Project | null>(null);
   const { toast } = useToast();
 
-  const load = () => {
-    const pFn = role === 'TEAM_MEMBER' ? api.getProjectsForUser(user!.id) : api.getProjects();
-    pFn.then(setProjects).catch((error) => {
+  const load = async () => {
+    try {
+      const projectsData = role === 'TEAM_MEMBER' ? await api.getProjectsForUser(user!.id) : await api.getProjects();
+      setProjects(projectsData);
+    } catch (error) {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    });
-    api.getUsers().then(setUsers);
+    }
+
+    try {
+      const usersData = await api.getUsers();
+      setUsers(usersData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
-  useEffect(load, [role, user]);
+  useEffect(() => { load(); }, [role, user]);
 
   const filtered = projects.filter(p => {
     const matchSearch = p.title.toLowerCase().includes(search.toLowerCase());

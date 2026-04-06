@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, PriorityBadge } from '@/pages/Dashboard';
 import * as api from '@/services/api';
@@ -28,16 +28,29 @@ export default function Tasks() {
   const [commentTask, setCommentTask] = useState<Task | null>(null);
   const { toast } = useToast();
 
-  const load = () => {
-    api.getTasks()
-      .then(setTasks)
-      .catch((error) => {
-        toast({ title: extractErrorMessage(error), variant: 'destructive' });
-      });
-    api.getUsers().then(setUsers);
-    api.getProjects().then(setProjects);
+  const load = async () => {
+    try {
+      const tasksData = await api.getTasks();
+      setTasks(tasksData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+
+    try {
+      const usersData = await api.getUsers();
+      setUsers(usersData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+
+    try {
+      const projectsData = await api.getProjects();
+      setProjects(projectsData);
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
   };
-  useEffect(load, [role, user]);
+  useEffect(() => { load(); }, [role, user]);
 
   const filtered = tasks.filter(t => {
     const s = search.toLowerCase();
@@ -81,7 +94,10 @@ export default function Tasks() {
           <Dialog open={dialogOpen} onOpenChange={o => { setDialogOpen(o); if (!o) setEditing(null); }}>
             <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> New Task</Button></DialogTrigger>
             <DialogContent className="max-w-lg">
-              <DialogHeader><DialogTitle>{editing ? 'Edit Task' : 'Create Task'}</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle>{editing ? 'Edit Task' : 'Create Task'}</DialogTitle>
+                <DialogDescription>{editing ? 'Update the task details below.' : 'Fill in the task information to create a new task.'}</DialogDescription>
+              </DialogHeader>
               <TaskForm users={users} projects={projects} task={editing} onSave={() => { setDialogOpen(false); setEditing(null); load(); }} />
             </DialogContent>
           </Dialog>
@@ -153,7 +169,10 @@ export default function Tasks() {
 
       <Dialog open={!!commentTask} onOpenChange={o => { if (!o) setCommentTask(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Comments — {commentTask?.title}</DialogTitle></DialogHeader>
+          <DialogHeader>
+            <DialogTitle>Comments — {commentTask?.title}</DialogTitle>
+            <DialogDescription>View and add comments for this task.</DialogDescription>
+          </DialogHeader>
           {commentTask && <CommentsSection task={commentTask} users={users} userId={user!.id} onCommentAdded={load} />}
         </DialogContent>
       </Dialog>
