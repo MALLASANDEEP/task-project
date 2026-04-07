@@ -91,6 +91,19 @@ drop policy if exists conversation_members_select_self on public.conversation_me
 create policy conversation_members_select_self on public.conversation_members
 for select using (user_id = auth.uid());
 
+drop policy if exists conversation_members_insert_creator on public.conversation_members;
+create policy conversation_members_insert_creator on public.conversation_members
+for insert with check (
+  exists (
+    select 1 from public.conversations c
+    where c.id = conversation_members.conversation_id and c.created_by = auth.uid()
+  )
+);
+
+drop policy if exists conversation_members_update_self on public.conversation_members;
+create policy conversation_members_update_self on public.conversation_members
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
 drop policy if exists messages_select_members on public.messages;
 create policy messages_select_members on public.messages
 for select using (
@@ -114,6 +127,18 @@ for insert with check (
   )
 );
 
+drop policy if exists message_receipts_select_self on public.message_receipts;
+create policy message_receipts_select_self on public.message_receipts
+for select using (user_id = auth.uid());
+
+drop policy if exists message_receipts_insert_self on public.message_receipts;
+create policy message_receipts_insert_self on public.message_receipts
+for insert with check (user_id = auth.uid());
+
+drop policy if exists message_receipts_update_self on public.message_receipts;
+create policy message_receipts_update_self on public.message_receipts
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
+
 drop policy if exists calls_select_members on public.calls;
 create policy calls_select_members on public.calls
 for select using (
@@ -132,3 +157,36 @@ for insert with check (
     where p.id = auth.uid() and p.role in ('ADMIN', 'PROJECT_MANAGER')
   )
 );
+
+drop policy if exists calls_update_members on public.calls;
+create policy calls_update_members on public.calls
+for update using (
+  exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = calls.conversation_id and cm.user_id = auth.uid()
+  )
+) with check (
+  exists (
+    select 1 from public.conversation_members cm
+    where cm.conversation_id = calls.conversation_id and cm.user_id = auth.uid()
+  )
+);
+
+drop policy if exists call_participants_select_members on public.call_participants;
+create policy call_participants_select_members on public.call_participants
+for select using (
+  exists (
+    select 1
+    from public.calls c
+    join public.conversation_members cm on cm.conversation_id = c.conversation_id
+    where c.id = call_participants.call_id and cm.user_id = auth.uid()
+  )
+);
+
+drop policy if exists call_participants_insert_self on public.call_participants;
+create policy call_participants_insert_self on public.call_participants
+for insert with check (user_id = auth.uid());
+
+drop policy if exists call_participants_update_self on public.call_participants;
+create policy call_participants_update_self on public.call_participants
+for update using (user_id = auth.uid()) with check (user_id = auth.uid());
