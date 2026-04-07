@@ -481,7 +481,7 @@ function CommentsSection({
       </div>
       <div className="flex gap-2">
         <Input
-          placeholder="Write a comment"
+          placeholder="Write a comment (use @username to mention)"
           value={comment}
           onChange={(e) => setComment(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAdd()}

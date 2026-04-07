@@ -20,6 +20,11 @@ export type Permission =
   | 'tasks:update-own-status'
   | 'tasks:view'
   | 'comments:add'
+  | 'chat:view'
+  | 'chat:send'
+  | 'chat:create-group'
+  | 'calls:initiate'
+  | 'calls:join'
   | 'reports:view'
   | 'dashboard:view'
   | 'teams:manage';
@@ -38,6 +43,11 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'tasks:update-own-status',
     'tasks:view',
     'comments:add',
+    'chat:view',
+    'chat:send',
+    'chat:create-group',
+    'calls:initiate',
+    'calls:join',
     'reports:view',
     'dashboard:view',
     'teams:manage',
@@ -49,6 +59,11 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'tasks:assign',
     'tasks:view',
     'comments:add',
+    'chat:view',
+    'chat:send',
+    'chat:create-group',
+    'calls:initiate',
+    'calls:join',
     'reports:view',
     'dashboard:view',
   ],
@@ -56,11 +71,15 @@ const rolePermissions: Record<UserRole, Permission[]> = {
     'tasks:update-own-status',
     'tasks:view',
     'comments:add',
+    'chat:view',
+    'chat:send',
+    'calls:join',
     'dashboard:view',
   ],
   VIEWER: [
     'tasks:view',
     'reports:view',
+    'chat:view',
     'dashboard:view',
   ],
 };

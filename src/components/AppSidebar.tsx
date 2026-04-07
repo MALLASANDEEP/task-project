@@ -5,7 +5,19 @@ import {
   Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel,
   SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter, useSidebar,
 } from '@/components/ui/sidebar';
-import { LayoutDashboard, FolderKanban, ListChecks, Users, Settings, Layers, LogOut, BarChart3, BriefcaseBusiness } from 'lucide-react';
+import {
+  LayoutDashboard,
+  FolderKanban,
+  ListChecks,
+  Users,
+  Settings,
+  Layers,
+  LogOut,
+  BarChart3,
+  BriefcaseBusiness,
+  MessagesSquare,
+  Phone,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { UserRole } from '@/types';
 import { roleLabel } from '@/lib/rbac';
@@ -14,6 +26,8 @@ const coreMenuItems: Array<{ title: string; url: string; icon: any; roles: UserR
   { title: 'Dashboard', url: '/dashboard', icon: LayoutDashboard, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
   { title: 'Projects', url: '/projects', icon: FolderKanban, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
   { title: 'Tasks', url: '/tasks', icon: ListChecks, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
+  { title: 'Messages', url: '/messages', icon: MessagesSquare, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
+  { title: 'Calls', url: '/calls', icon: Phone, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER'] },
   { title: 'Analytics', url: '/analytics', icon: BarChart3, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
   { title: 'Settings', url: '/settings', icon: Settings, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER'] },
 ];

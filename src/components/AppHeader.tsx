@@ -8,9 +8,11 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Notification } from '@/types';
 import * as api from '@/services/api';
 import { Input } from '@/components/ui/input';
+import { useToast } from '@/hooks/use-toast';
 
 export function AppHeader() {
   const { user } = useAuth();
+  const { toast } = useToast();
   const [notifications, setNotifications] = useState<Notification[]>([]);
   const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
 
@@ -33,6 +35,19 @@ export function AppHeader() {
       active = false;
     };
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    const unsubscribe = api.subscribeCommunicationEvents((event) => {
+      if (event.type === 'call:update' && event.call.status === 'ringing' && event.call.participants.includes(user.id)) {
+        toast({
+          title: 'Incoming call',
+          description: `You have an incoming ${event.call.type} call.`,
+        });
+      }
+    });
+    return unsubscribe;
+  }, [user, toast]);
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

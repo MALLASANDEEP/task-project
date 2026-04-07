@@ -5,7 +5,23 @@
 
 import { supabase } from '@/lib/supabase';
 import { mockUsers, mockCredentials, mockProjects, mockTeams, mockTasks, mockNotifications } from '@/data/mockData';
-import { User, Project, Team, Task, Notification, TaskStatus, UserRole, UserStatus, Comment } from '@/types';
+import {
+  User,
+  Project,
+  Team,
+  Task,
+  Notification,
+  TaskStatus,
+  UserRole,
+  UserStatus,
+  Comment,
+  Conversation,
+  ChatMessage,
+  TypingState,
+  CallSession,
+  CallType,
+  MessageType,
+} from '@/types';
 import { AuthorizationError, hasPermission } from '@/lib/rbac';
 
 let activeUserId: string | null = null;
@@ -56,6 +72,36 @@ function initializeTasks(): Task[] {
   return stored ? JSON.parse(stored) : [...mockTasks];
 }
 
+function initializeNotifications(): Notification[] {
+  if (typeof localStorage === 'undefined') return [...mockNotifications];
+  const stored = localStorage.getItem('taskflow_mock_notifications');
+  return stored ? JSON.parse(stored) : [...mockNotifications];
+}
+
+function initializeConversations(): Conversation[] {
+  if (typeof localStorage === 'undefined') return [];
+  const stored = localStorage.getItem('taskflow_mock_conversations');
+  return stored ? JSON.parse(stored) : [];
+}
+
+function initializeMessages(): ChatMessage[] {
+  if (typeof localStorage === 'undefined') return [];
+  const stored = localStorage.getItem('taskflow_mock_messages');
+  return stored ? JSON.parse(stored) : [];
+}
+
+function initializeTypingStates(): TypingState[] {
+  if (typeof localStorage === 'undefined') return [];
+  const stored = localStorage.getItem('taskflow_mock_typing_states');
+  return stored ? JSON.parse(stored) : [];
+}
+
+function initializeCallSessions(): CallSession[] {
+  if (typeof localStorage === 'undefined') return [];
+  const stored = localStorage.getItem('taskflow_mock_calls');
+  return stored ? JSON.parse(stored) : [];
+}
+
 function saveProjects(projects: Project[]): void {
   if (typeof localStorage !== 'undefined') {
     localStorage.setItem('taskflow_mock_projects', JSON.stringify(projects));
@@ -74,12 +120,46 @@ function saveTasks(tasks: Task[]): void {
   }
 }
 
+function saveNotifications(notificationItems: Notification[]): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('taskflow_mock_notifications', JSON.stringify(notificationItems));
+  }
+}
+
+function saveConversations(items: Conversation[]): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('taskflow_mock_conversations', JSON.stringify(items));
+  }
+}
+
+function saveMessages(items: ChatMessage[]): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('taskflow_mock_messages', JSON.stringify(items));
+  }
+}
+
+function saveTypingStates(items: TypingState[]): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('taskflow_mock_typing_states', JSON.stringify(items));
+  }
+}
+
+function saveCallSessions(items: CallSession[]): void {
+  if (typeof localStorage !== 'undefined') {
+    localStorage.setItem('taskflow_mock_calls', JSON.stringify(items));
+  }
+}
+
 let users = initializeUsers();
 let credentials = initializeCredentials();
 let projects = initializeProjects();
 let teams = initializeTeams();
 let tasks = initializeTasks();
-let notifications = [...mockNotifications];
+let notifications = initializeNotifications();
+let conversations = initializeConversations();
+let chatMessages = initializeMessages();
+let typingStates = initializeTypingStates();
+let callSessions = initializeCallSessions();
 
 type AuditAction =
   | 'LOGIN'
@@ -158,6 +238,78 @@ function assertTaskTransition(current: TaskStatus, next: TaskStatus) {
 
 export function setActiveUserId(userId: string | null) {
   activeUserId = userId;
+}
+
+type CommunicationEvent =
+  | { type: 'message:new'; conversationId: string; message: ChatMessage }
+  | { type: 'typing:update'; conversationId: string }
+  | { type: 'call:update'; call: CallSession }
+  | { type: 'conversation:update'; conversationId: string };
+
+const commListeners = new Set<(event: CommunicationEvent) => void>();
+
+function emitCommunicationEvent(event: CommunicationEvent) {
+  commListeners.forEach((listener) => listener(event));
+}
+
+export function subscribeCommunicationEvents(listener: (event: CommunicationEvent) => void) {
+  commListeners.add(listener);
+  return () => {
+    commListeners.delete(listener);
+  };
+}
+
+function createNotification(userId: string, title: string, message: string, type: Notification['type']) {
+  const nextNotification: Notification = {
+    id: `n${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
+    userId,
+    title,
+    message,
+    type,
+    read: false,
+    createdAt: new Date().toISOString(),
+  };
+  notifications = [nextNotification, ...notifications];
+  saveNotifications(notifications);
+}
+
+function findUserByMention(mentionName: string) {
+  const normalized = mentionName.trim().toLowerCase();
+  return users.find((u) => u.name.toLowerCase().replace(/\s+/g, '') === normalized.replace(/\s+/g, ''));
+}
+
+function extractMentionUserIds(content: string): string[] {
+  const mentionMatches = content.match(/@[a-zA-Z0-9_.-]+/g) || [];
+  const ids = mentionMatches
+    .map((token) => findUserByMention(token.replace('@', ''))?.id)
+    .filter((id): id is string => Boolean(id));
+  return Array.from(new Set(ids));
+}
+
+function getProjectMemberIds(projectId?: string): string[] {
+  if (!projectId) return [];
+  const project = projects.find((p) => p.id === projectId);
+  return project?.assignedUsers || [];
+}
+
+function canAccessConversation(actor: User, conversation: Conversation): boolean {
+  if (actor.role === 'ADMIN') return true;
+  if (conversation.participants.includes(actor.id)) return true;
+  if (conversation.type === 'project') {
+    const projectMembers = getProjectMemberIds(conversation.projectId);
+    if (actor.role === 'PROJECT_MANAGER') return projectMembers.length > 0;
+    if (actor.role === 'TEAM_MEMBER') return projectMembers.includes(actor.id);
+  }
+  return false;
+}
+
+function canSendMessage(actor: User, conversation: Conversation): boolean {
+  if (!hasPermission(actor.role, 'chat:send')) return false;
+  if (actor.role === 'TEAM_MEMBER' && conversation.type === 'project') {
+    const projectMembers = getProjectMemberIds(conversation.projectId);
+    return projectMembers.includes(actor.id);
+  }
+  return canAccessConversation(actor, conversation);
 }
 
 export async function getAuditLogs(): Promise<AuditLog[]> {
@@ -664,6 +816,9 @@ export async function createTask(data: Omit<Task, 'id' | 'createdAt' | 'comments
     };
     tasks.push(newTask);
     saveTasks(tasks);
+    if (newTask.assignedTo !== actor.id) {
+      createNotification(newTask.assignedTo, 'New Task Assigned', `You have been assigned "${newTask.title}"`, 'task_assigned');
+    }
     await writeAudit('CREATE_TASK', 'task', newTask.id);
     return newTask;
   }
@@ -674,6 +829,9 @@ export async function createTask(data: Omit<Task, 'id' | 'createdAt' | 'comments
     .select()
     .single();
   if (error) throw error;
+  if (newTask.assigned_to !== actor.id) {
+    createNotification(newTask.assigned_to, 'New Task Assigned', `You have been assigned "${newTask.title}"`, 'task_assigned');
+  }
   await writeAudit('CREATE_TASK', 'task', newTask.id);
   return { id: newTask.id, title: newTask.title, description: newTask.description, projectId: newTask.project_id, assignedTo: newTask.assigned_to, createdBy: newTask.created_by, status: newTask.status, priority: newTask.priority, dueDate: newTask.due_date, comments: [], createdAt: newTask.created_at };
 }
@@ -712,6 +870,9 @@ export async function updateTask(id: string, data: Partial<Task>): Promise<Task>
     const updated = { ...tasks[taskIndex], ...data, id: tasks[taskIndex].id, createdAt: tasks[taskIndex].createdAt, comments: tasks[taskIndex].comments };
     tasks[taskIndex] = updated;
     saveTasks(tasks);
+    if (data.assignedTo && data.assignedTo !== current.assignedTo) {
+      createNotification(data.assignedTo, 'Task Reassigned', `You were assigned "${updated.title}"`, 'task_assigned');
+    }
     await writeAudit('UPDATE_TASK', 'task', id);
     return updated;
   }
@@ -719,6 +880,9 @@ export async function updateTask(id: string, data: Partial<Task>): Promise<Task>
   const updateData = { ...(data.title && { title: data.title }), ...(data.description && { description: data.description }), ...(data.assignedTo && { assigned_to: data.assignedTo }), ...(data.status && { status: data.status }), ...(data.priority && { priority: data.priority }), ...(data.dueDate && { due_date: data.dueDate }) };
   const { data: updated, error } = await supabase.from('tasks').update(updateData).eq('id', id).select().single();
   if (error) throw error;
+  if (data.assignedTo && data.assignedTo !== current.assignedTo) {
+    createNotification(data.assignedTo, 'Task Reassigned', `You were assigned "${updated.title}"`, 'task_assigned');
+  }
   await writeAudit('UPDATE_TASK', 'task', id);
   return { id: updated.id, title: updated.title, description: updated.description, projectId: updated.project_id, assignedTo: updated.assigned_to, createdBy: updated.created_by, status: updated.status, priority: updated.priority, dueDate: updated.due_date, comments: [], createdAt: updated.created_at };
 }
@@ -766,6 +930,10 @@ export async function addComment(taskId: string, userId: string, content: string
     .select()
     .single();
   if (error) throw error;
+  const mentionUserIds = extractMentionUserIds(content).filter((id) => id !== userId);
+  mentionUserIds.forEach((mentionedId) => {
+    createNotification(mentionedId, 'You were mentioned', `Mentioned in task discussion: "${task.title}"`, 'mention');
+  });
   await writeAudit('ADD_COMMENT', 'comment', comment.id);
   return { id: comment.id, taskId: comment.task_id, userId: comment.user_id, content: comment.content, createdAt: comment.created_at };
 }
@@ -774,7 +942,7 @@ export async function addComment(taskId: string, userId: string, content: string
 export async function getNotificationsForUser(userId: string): Promise<Notification[]> {
   const actor = await requireUser();
   if (actor.id !== userId && actor.role !== 'ADMIN') throw new AuthorizationError('Forbidden');
-  if (!supabase) return mockNotifications.filter(n => n.userId === userId);
+  if (!supabase) return notifications.filter(n => n.userId === userId);
   const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId);
   if (error || !data) throw error;
   return data.map(n => ({ id: n.id, userId: n.user_id, title: n.title, message: n.message, read: n.read, type: n.type, createdAt: n.created_at }));
@@ -782,6 +950,14 @@ export async function getNotificationsForUser(userId: string): Promise<Notificat
 export async function markNotificationRead(id: string): Promise<void> {
   const actor = await requireUser();
   if (actor.role === 'VIEWER') throw new AuthorizationError('VIEWER role is read-only');
+  if (!supabase) {
+    const existing = notifications.find((n) => n.id === id);
+    if (!existing) return;
+    if (actor.id !== existing.userId && actor.role !== 'ADMIN') throw new AuthorizationError('Forbidden');
+    notifications = notifications.map((n) => (n.id === id ? { ...n, read: true } : n));
+    saveNotifications(notifications);
+    return;
+  }
   const { data: notification, error: fetchError } = await supabase.from('notifications').select('*').eq('id', id).single();
   if (fetchError || !notification) return;
   if (actor.id !== notification.user_id && actor.role !== 'ADMIN') throw new AuthorizationError('Forbidden');
@@ -792,8 +968,271 @@ export async function markAllNotificationsRead(userId: string): Promise<void> {
   const actor = await requireUser();
   if (actor.role === 'VIEWER') throw new AuthorizationError('VIEWER role is read-only');
   if (actor.id !== userId && actor.role !== 'ADMIN') throw new AuthorizationError('Forbidden');
+  if (!supabase) {
+    notifications = notifications.map((n) => (n.userId === userId ? { ...n, read: true } : n));
+    saveNotifications(notifications);
+    return;
+  }
   const { error } = await supabase.from('notifications').update({ read: true }).eq('user_id', userId);
   if (error) throw error;
+}
+
+// ── Communication (Chat + Calls) ─────────────────────
+export async function getConversations(): Promise<Conversation[]> {
+  const actor = await requirePermission('chat:view');
+  return conversations
+    .filter((conversation) => canAccessConversation(actor, conversation))
+    .sort((a, b) => new Date(b.lastMessageAt).getTime() - new Date(a.lastMessageAt).getTime());
+}
+
+export async function createDirectConversation(otherUserId: string): Promise<Conversation> {
+  const actor = await requirePermission('chat:send');
+  if (actor.id === otherUserId) throw new AuthorizationError('Cannot start a direct conversation with yourself');
+
+  const existing = conversations.find(
+    (conversation) =>
+      conversation.type === 'direct' &&
+      conversation.participants.length === 2 &&
+      conversation.participants.includes(actor.id) &&
+      conversation.participants.includes(otherUserId),
+  );
+  if (existing) return existing;
+
+  const nextConversation: Conversation = {
+    id: `conv${Date.now()}${Math.random().toString(16).slice(2, 5)}`,
+    type: 'direct',
+    participants: [actor.id, otherUserId],
+    createdBy: actor.id,
+    title: 'Direct message',
+    createdAt: new Date().toISOString(),
+    lastMessageAt: new Date().toISOString(),
+  };
+
+  conversations = [nextConversation, ...conversations];
+  saveConversations(conversations);
+  emitCommunicationEvent({ type: 'conversation:update', conversationId: nextConversation.id });
+  return nextConversation;
+}
+
+export async function createProjectConversation(projectId: string, title: string): Promise<Conversation> {
+  const actor = await requirePermission('chat:create-group');
+  const project = projects.find((item) => item.id === projectId);
+  if (!project) throw new Error('Project not found');
+
+  const nextConversation: Conversation = {
+    id: `conv${Date.now()}${Math.random().toString(16).slice(2, 5)}`,
+    type: 'project',
+    title: title.trim() || `${project.title} chat`,
+    projectId,
+    participants: [...new Set([actor.id, ...project.assignedUsers])],
+    createdBy: actor.id,
+    createdAt: new Date().toISOString(),
+    lastMessageAt: new Date().toISOString(),
+  };
+
+  conversations = [nextConversation, ...conversations];
+  saveConversations(conversations);
+  emitCommunicationEvent({ type: 'conversation:update', conversationId: nextConversation.id });
+  return nextConversation;
+}
+
+export async function getConversationMessages(conversationId: string): Promise<ChatMessage[]> {
+  const actor = await requirePermission('chat:view');
+  const conversation = conversations.find((item) => item.id === conversationId);
+  if (!conversation || !canAccessConversation(actor, conversation)) throw new AuthorizationError('Forbidden');
+  return chatMessages
+    .filter((message) => message.conversationId === conversationId)
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+}
+
+export async function sendMessage(input: {
+  conversationId: string;
+  content: string;
+  type?: MessageType;
+  fileUrl?: string;
+}): Promise<ChatMessage> {
+  const actor = await requirePermission('chat:send');
+  const conversation = conversations.find((item) => item.id === input.conversationId);
+  if (!conversation) throw new Error('Conversation not found');
+  if (!canSendMessage(actor, conversation)) throw new AuthorizationError('Forbidden');
+
+  const content = input.content.trim();
+  if (!content && !input.fileUrl) throw new Error('Message cannot be empty');
+  const mentions = extractMentionUserIds(content).filter((id) => id !== actor.id);
+
+  const message: ChatMessage = {
+    id: `msg${Date.now()}${Math.random().toString(16).slice(2, 5)}`,
+    conversationId: conversation.id,
+    senderId: actor.id,
+    content,
+    type: input.type || 'text',
+    fileUrl: input.fileUrl,
+    mentions,
+    status: 'delivered',
+    seenBy: [actor.id],
+    createdAt: new Date().toISOString(),
+  };
+
+  chatMessages = [...chatMessages, message];
+  saveMessages(chatMessages);
+
+  conversations = conversations.map((item) =>
+    item.id === conversation.id ? { ...item, lastMessageAt: message.createdAt } : item,
+  );
+  saveConversations(conversations);
+
+  conversation.participants
+    .filter((participantId) => participantId !== actor.id)
+    .forEach((participantId) => {
+      createNotification(participantId, 'New message', `${actor.name}: ${content || 'sent an attachment'}`, 'message');
+    });
+
+  mentions.forEach((mentionedUserId) => {
+    createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention');
+  });
+
+  emitCommunicationEvent({ type: 'message:new', conversationId: conversation.id, message });
+  emitCommunicationEvent({ type: 'conversation:update', conversationId: conversation.id });
+  return message;
+}
+
+export async function markMessagesSeen(conversationId: string): Promise<void> {
+  const actor = await requirePermission('chat:view');
+  chatMessages = chatMessages.map((message) => {
+    if (message.conversationId !== conversationId) return message;
+    if (message.seenBy.includes(actor.id)) return { ...message, status: 'seen' };
+    return { ...message, seenBy: [...message.seenBy, actor.id], status: 'seen' };
+  });
+  saveMessages(chatMessages);
+  emitCommunicationEvent({ type: 'conversation:update', conversationId });
+}
+
+export async function setTypingIndicator(conversationId: string, isTyping: boolean): Promise<void> {
+  const actor = await requirePermission('chat:send');
+  const existing = typingStates.find(
+    (typingState) => typingState.conversationId === conversationId && typingState.userId === actor.id,
+  );
+  if (existing) {
+    typingStates = typingStates.map((typingState) =>
+      typingState.conversationId === conversationId && typingState.userId === actor.id
+        ? { ...typingState, isTyping, updatedAt: new Date().toISOString() }
+        : typingState,
+    );
+  } else {
+    typingStates = [
+      ...typingStates,
+      { conversationId, userId: actor.id, isTyping, updatedAt: new Date().toISOString() },
+    ];
+  }
+  saveTypingStates(typingStates);
+  emitCommunicationEvent({ type: 'typing:update', conversationId });
+}
+
+export async function getTypingUsers(conversationId: string): Promise<string[]> {
+  const actor = await requirePermission('chat:view');
+  const now = Date.now();
+  return typingStates
+    .filter(
+      (typingState) =>
+        typingState.conversationId === conversationId &&
+        typingState.userId !== actor.id &&
+        typingState.isTyping &&
+        now - new Date(typingState.updatedAt).getTime() < 4000,
+    )
+    .map((typingState) => typingState.userId);
+}
+
+export async function getActiveCalls(): Promise<CallSession[]> {
+  const actor = await requireUser();
+  return callSessions.filter(
+    (session) =>
+      session.status !== 'ended' &&
+      session.participants.includes(actor.id) &&
+      (hasPermission(actor.role, 'calls:join') || actor.role === 'ADMIN'),
+  );
+}
+
+export async function startCall(conversationId: string, type: CallType): Promise<CallSession> {
+  const actor = await requireUser();
+  if (!hasPermission(actor.role, 'calls:initiate')) {
+    throw new AuthorizationError('Only PROJECT_MANAGER and ADMIN can initiate calls');
+  }
+
+  const conversation = conversations.find((item) => item.id === conversationId);
+  if (!conversation || !canAccessConversation(actor, conversation)) throw new AuthorizationError('Forbidden');
+
+  const nextCall: CallSession = {
+    id: `call${Date.now()}${Math.random().toString(16).slice(2, 5)}`,
+    conversationId,
+    initiatedBy: actor.id,
+    participants: [...new Set(conversation.participants)],
+    type,
+    status: 'ringing',
+    startedAt: new Date().toISOString(),
+  };
+
+  callSessions = [nextCall, ...callSessions];
+  saveCallSessions(callSessions);
+
+  nextCall.participants
+    .filter((participantId) => participantId !== actor.id)
+    .forEach((participantId) => {
+      createNotification(participantId, 'Incoming call', `${actor.name} started a ${type} call`, 'call');
+    });
+
+  emitCommunicationEvent({ type: 'call:update', call: nextCall });
+  return nextCall;
+}
+
+export async function joinCall(callId: string): Promise<CallSession> {
+  const actor = await requirePermission('calls:join');
+  const current = callSessions.find((session) => session.id === callId);
+  if (!current) throw new Error('Call not found');
+  if (!current.participants.includes(actor.id)) throw new AuthorizationError('Forbidden');
+
+  const updated: CallSession = {
+    ...current,
+    status: 'ongoing',
+    participants: Array.from(new Set([...current.participants, actor.id])),
+  };
+  callSessions = callSessions.map((session) => (session.id === callId ? updated : session));
+  saveCallSessions(callSessions);
+  emitCommunicationEvent({ type: 'call:update', call: updated });
+  return updated;
+}
+
+export async function endCall(callId: string): Promise<void> {
+  const actor = await requireUser();
+  const current = callSessions.find((session) => session.id === callId);
+  if (!current) return;
+  if (!current.participants.includes(actor.id) && actor.role !== 'ADMIN') throw new AuthorizationError('Forbidden');
+
+  const updated: CallSession = {
+    ...current,
+    status: 'ended',
+    endedAt: new Date().toISOString(),
+  };
+  callSessions = callSessions.map((session) => (session.id === callId ? updated : session));
+  saveCallSessions(callSessions);
+  emitCommunicationEvent({ type: 'call:update', call: updated });
+}
+
+export async function searchMessages(query: string): Promise<ChatMessage[]> {
+  const actor = await requirePermission('chat:view');
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return [];
+
+  const accessibleConversationIds = conversations
+    .filter((conversation) => canAccessConversation(actor, conversation))
+    .map((conversation) => conversation.id);
+
+  return chatMessages
+    .filter(
+      (message) =>
+        accessibleConversationIds.includes(message.conversationId) &&
+        message.content.toLowerCase().includes(trimmed),
+    )
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
 }
 
 // ── Stats (Admin) ─────────────────────────────────────
