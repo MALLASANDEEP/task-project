@@ -1,12 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { FloatingInput } from '@/components/ui/floating-field';
 import * as api from '@/services/api';
 import { User, UserRole, UserStatus } from '@/types';
 import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
@@ -117,10 +117,18 @@ function UserForm({ user, onSave }: { user: User | null; onSave: () => void }) {
   const [email, setEmail] = useState(user?.email || '');
   const [role, setRole] = useState<UserRole>(user?.role || 'TEAM_MEMBER');
   const [status, setStatus] = useState<UserStatus>(user?.status || 'active');
+  const [errors, setErrors] = useState<{ name?: string; email?: string }>({});
   const { toast } = useToast();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const nextErrors: { name?: string; email?: string } = {};
+    if (!name.trim()) nextErrors.name = 'Name is required';
+    if (!email.trim()) nextErrors.email = 'Email is required';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     try {
       if (user) {
         await api.updateUser(user.id, { name, email, role, status });
@@ -137,13 +145,12 @@ function UserForm({ user, onSave }: { user: User | null; onSave: () => void }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2"><Label>Name</Label><Input value={name} onChange={e => setName(e.target.value)} required /></div>
-      <div className="space-y-2"><Label>Email</Label><Input type="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
+      <FloatingInput label="Full Name" value={name} onChange={e => setName(e.target.value)} error={errors.name} />
+      <FloatingInput type="email" label="Email Address" value={email} onChange={e => setEmail(e.target.value)} error={errors.email} />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Role</Label>
           <Select value={role} onValueChange={v => setRole(v as UserRole)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Role" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="ADMIN">ADMIN</SelectItem>
               <SelectItem value="PROJECT_MANAGER">PROJECT_MANAGER</SelectItem>
@@ -153,9 +160,8 @@ function UserForm({ user, onSave }: { user: User | null; onSave: () => void }) {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Status</Label>
           <Select value={status} onValueChange={v => setStatus(v as UserStatus)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Status" /></SelectTrigger>
             <SelectContent><SelectItem value="active">Active</SelectItem><SelectItem value="inactive">Inactive</SelectItem></SelectContent>
           </Select>
         </div>

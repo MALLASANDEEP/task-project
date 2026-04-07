@@ -1,19 +1,33 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Textarea } from '@/components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { StatusBadge, PriorityBadge } from '@/pages/Dashboard';
 import * as api from '@/services/api';
 import { Task, User, Project, Priority, TaskStatus } from '@/types';
-import { Plus, Search, MessageSquare, Pencil, Trash2, Send } from 'lucide-react';
+import {
+  CalendarDays,
+  MessageSquare,
+  Pencil,
+  Plus,
+  Search,
+  Send,
+  Trash2,
+} from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { extractErrorMessage } from '@/lib/rbac';
+import { FloatingInput, FloatingTextarea } from '@/components/ui/floating-field';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+
+const columns: Array<{ key: TaskStatus; title: string }> = [
+  { key: 'pending', title: 'To Do' },
+  { key: 'in_progress', title: 'In Progress' },
+  { key: 'completed', title: 'Done' },
+];
 
 export default function Tasks() {
   const { can, role, user } = useAuth();
@@ -21,157 +35,261 @@ export default function Tasks() {
   const [users, setUsers] = useState<User[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [commentTask, setCommentTask] = useState<Task | null>(null);
+  const [draggingTaskId, setDraggingTaskId] = useState<string | null>(null);
   const { toast } = useToast();
 
   const load = async () => {
-    try {
-      const tasksData = await api.getTasks();
-      setTasks(tasksData);
-    } catch (error) {
-      toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    }
+    const [tasksData, usersData, projectsData] = await Promise.all([
+      api.getTasks().catch(() => []),
+      api.getUsers().catch(() => []),
+      api.getProjects().catch(() => []),
+    ]);
 
-    try {
-      const usersData = await api.getUsers();
-      setUsers(usersData);
-    } catch (error) {
-      toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    }
-
-    try {
-      const projectsData = await api.getProjects();
-      setProjects(projectsData);
-    } catch (error) {
-      toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    }
+    setTasks(tasksData);
+    setUsers(usersData);
+    setProjects(projectsData);
   };
-  useEffect(() => { load(); }, [role, user]);
 
-  const filtered = tasks.filter(t => {
-    const s = search.toLowerCase();
-    const matchSearch = t.title.toLowerCase().includes(s) || t.description.toLowerCase().includes(s);
-    const matchStatus = statusFilter === 'all' || t.status === statusFilter;
-    const matchPriority = priorityFilter === 'all' || t.priority === priorityFilter;
-    return matchSearch && matchStatus && matchPriority;
-  });
-
-  const handleStatusChange = async (id: string, status: TaskStatus) => {
-    try {
-      await api.updateTaskStatus(id, status);
-      toast({ title: 'Task status updated' });
-      load();
-    } catch (error) {
+  useEffect(() => {
+    load().catch((error) => {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
-    }
+    });
+  }, [role, user]);
+
+  const filtered = useMemo(() => {
+    return tasks.filter((task) => {
+      const s = search.toLowerCase();
+      const matchSearch = task.title.toLowerCase().includes(s) || task.description.toLowerCase().includes(s);
+      const matchPriority = priorityFilter === 'all' || task.priority === priorityFilter;
+      return matchSearch && matchPriority;
+    });
+  }, [tasks, search, priorityFilter]);
+
+  const grouped = useMemo(() => {
+    return columns.map((column) => ({
+      ...column,
+      tasks: filtered.filter((task) => task.status === column.key),
+    }));
+  }, [filtered]);
+
+  const counts = {
+    total: tasks.length,
+    completed: tasks.filter((t) => t.status === 'completed').length,
+    pending: tasks.filter((t) => t.status === 'pending').length,
+    overdue: tasks.filter((t) => t.status !== 'completed' && new Date(t.dueDate).getTime() < Date.now()).length,
   };
+
+  const getUser = (id: string) => users.find((u) => u.id === id);
+  const getUserName = (id: string) => users.find((u) => u.id === id)?.name || 'Unknown';
+  const getProjectTitle = (id: string) => projects.find((p) => p.id === id)?.title || 'Unknown';
+  const getInitials = (name: string) =>
+    name
+      .split(' ')
+      .map((part) => part[0])
+      .join('')
+      .slice(0, 2)
+      .toUpperCase();
 
   const handleDelete = async (id: string) => {
     try {
       await api.deleteTask(id);
       toast({ title: 'Task deleted' });
-      load();
+      await load();
     } catch (error) {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
   };
 
-  const getUserName = (id: string) => users.find(u => u.id === id)?.name || 'Unknown';
-  const getProjectTitle = (id: string) => projects.find(p => p.id === id)?.title || 'Unknown';
+  const moveTask = async (taskId: string, nextStatus: TaskStatus) => {
+    try {
+      await api.updateTaskStatus(taskId, nextStatus);
+      await load();
+    } catch (error) {
+      toast({ title: extractErrorMessage(error), variant: 'destructive' });
+    }
+  };
+
+  const onDrop = async (status: TaskStatus) => {
+    if (!draggingTaskId) return;
+    setDraggingTaskId(null);
+    await moveTask(draggingTaskId, status);
+  };
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-2xl font-bold">{role === 'TEAM_MEMBER' ? 'My Tasks' : 'Tasks'}</h1>
-          <p className="text-muted-foreground text-sm mt-1">{filtered.length} task{filtered.length !== 1 ? 's' : ''}</p>
+          <h1 className="text-3xl font-semibold">{role === 'TEAM_MEMBER' ? 'My Kanban' : 'Task Board'}</h1>
+          <p className="text-sm text-muted-foreground mt-1">Plan, prioritize, and ship work in a clear workflow.</p>
         </div>
-        {can('tasks:create') && (
-          <Dialog open={dialogOpen} onOpenChange={o => { setDialogOpen(o); if (!o) setEditing(null); }}>
-            <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4" /> New Task</Button></DialogTrigger>
-            <DialogContent className="max-w-lg">
-              <DialogHeader>
-                <DialogTitle>{editing ? 'Edit Task' : 'Create Task'}</DialogTitle>
-                <DialogDescription>{editing ? 'Update the task details below.' : 'Fill in the task information to create a new task.'}</DialogDescription>
-              </DialogHeader>
-              <TaskForm users={users} projects={projects} task={editing} onSave={() => { setDialogOpen(false); setEditing(null); load(); }} />
-            </DialogContent>
-          </Dialog>
-        )}
+        <div className="flex items-center gap-2">
+          {can('tasks:create') && (
+            <Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o) setEditing(null); }}>
+              <DialogTrigger asChild>
+                <Button className="gap-2">
+                  <Plus className="h-4 w-4" />
+                  New Task
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-xl">
+                <DialogHeader>
+                  <DialogTitle>{editing ? 'Edit Task' : 'Create Task'}</DialogTitle>
+                  <DialogDescription>
+                    {editing ? 'Update task details and save changes.' : 'Add a task with owner, priority, and timeline.'}
+                  </DialogDescription>
+                </DialogHeader>
+                <TaskForm
+                  users={users}
+                  projects={projects}
+                  task={editing}
+                  onSave={async () => {
+                    setDialogOpen(false);
+                    setEditing(null);
+                    await load();
+                  }}
+                />
+              </DialogContent>
+            </Dialog>
+          )}
+        </div>
       </div>
 
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search tasks…" className="pl-9" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="Status" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Status</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectContent>
-        </Select>
-        <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-          <SelectTrigger className="w-[140px]"><SelectValue placeholder="Priority" /></SelectTrigger>
-          <SelectContent><SelectItem value="all">All Priority</SelectItem><SelectItem value="high">High</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="low">Low</SelectItem></SelectContent>
-        </Select>
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <MetricTile label="Total" value={counts.total} />
+        <MetricTile label="Completed" value={counts.completed} tone="text-[hsl(var(--success))]" />
+        <MetricTile label="Pending" value={counts.pending} tone="text-[hsl(var(--warning))]" />
+        <MetricTile label="Overdue" value={counts.overdue} tone="text-destructive" />
       </div>
 
-      <div className="space-y-3">
-        {filtered.map(t => (
-          <Card key={t.id} className="hover:shadow-sm transition-shadow">
-            <CardContent className="p-4">
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="font-medium text-sm">{t.title}</p>
-                    <StatusBadge status={t.status} />
-                    <PriorityBadge priority={t.priority} />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{t.description}</p>
-                  <div className="flex items-center gap-3 mt-2 text-xs text-muted-foreground">
-                    <span>Project: {getProjectTitle(t.projectId)}</span>
-                    <span>Assigned: {getUserName(t.assignedTo)}</span>
-                    <span>Due: {new Date(t.dueDate).toLocaleDateString()}</span>
-                    {t.comments.length > 0 && <span className="flex items-center gap-1"><MessageSquare className="h-3 w-3" />{t.comments.length}</span>}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  {(role === 'TEAM_MEMBER') && t.status !== 'completed' && (
-                    <Select value={t.status} onValueChange={v => handleStatusChange(t.id, v as TaskStatus)}>
-                      <SelectTrigger className="w-[130px] h-8 text-xs"><SelectValue /></SelectTrigger>
-                      <SelectContent><SelectItem value="pending">Pending</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectContent>
-                    </Select>
-                  )}
-                  {can('comments:add') && (
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setCommentTask(t)}>
-                      <MessageSquare className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {(can('tasks:update') || can('tasks:delete')) && (
-                    <>
-                      {can('tasks:update') && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setEditing(t); setDialogOpen(true); }}><Pencil className="h-4 w-4" /></Button>
-                      )}
-                      {can('tasks:delete') && (
-                        <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(t.id)}><Trash2 className="h-4 w-4" /></Button>
-                      )}
-                    </>
-                  )}
-                </div>
+      <Card>
+        <CardContent className="p-4 md:p-5">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search title or description"
+                className="pl-9 rounded-xl h-10"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
+              <SelectTrigger className="w-full md:w-[160px] rounded-xl">
+                <SelectValue placeholder="Priority" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Priority</SelectItem>
+                <SelectItem value="high">High</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="low">Low</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </CardContent>
+      </Card>
+
+      {filtered.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="p-10 text-center">
+            <h3 className="font-medium">No tasks found</h3>
+            <p className="text-sm text-muted-foreground mt-1">Try changing filters or create a new task.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          {grouped.map((column) => (
+            <div
+              key={column.key}
+              className="rounded-2xl border border-border/70 bg-card/75 p-3 md:p-4"
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={() => onDrop(column.key)}
+            >
+              <div className="mb-3 flex items-center justify-between">
+                <h2 className="text-sm font-semibold">{column.title}</h2>
+                <Badge variant="outline" className="rounded-full">{column.tasks.length}</Badge>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
-      <Dialog open={!!commentTask} onOpenChange={o => { if (!o) setCommentTask(null); }}>
+              <div className="space-y-3 min-h-[220px]">
+                {column.tasks.map((task) => (
+                  <Card
+                    key={task.id}
+                    draggable
+                    onDragStart={() => setDraggingTaskId(task.id)}
+                    className="cursor-grab border-border/70 hover:border-primary/35 hover:shadow-[0_12px_28px_-22px_hsl(var(--primary))]"
+                  >
+                    <CardContent className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium leading-5">{task.title}</p>
+                        <PriorityBadge priority={task.priority} />
+                      </div>
+
+                      <p className="text-xs text-muted-foreground line-clamp-2">{task.description}</p>
+
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span className="truncate max-w-[140px]">{getProjectTitle(task.projectId)}</span>
+                        <span className="inline-flex items-center gap-1">
+                          <CalendarDays className="h-3.5 w-3.5" />
+                          {new Date(task.dueDate).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between pt-1">
+                        <div className="inline-flex items-center gap-2">
+                          <Avatar className="h-7 w-7 border border-border/70">
+                            <AvatarImage src={getUser(task.assignedTo)?.avatar} alt={getUserName(task.assignedTo)} />
+                            <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-semibold">
+                              {getInitials(getUserName(task.assignedTo))}
+                            </AvatarFallback>
+                          </Avatar>
+                          <span className="text-xs text-muted-foreground truncate max-w-[120px]">{getUserName(task.assignedTo)}</span>
+                        </div>
+
+                        <div className="flex items-center gap-1">
+                          <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg" onClick={() => setCommentTask(task)}>
+                            <MessageSquare className="h-4 w-4" />
+                          </Button>
+                          {can('tasks:update') && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 rounded-lg"
+                              onClick={() => {
+                                setEditing(task);
+                                setDialogOpen(true);
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                          {can('tasks:delete') && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8 rounded-lg text-destructive" onClick={() => handleDelete(task.id)}>
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="pt-1">
+                        <StatusBadge status={task.status} />
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <Dialog open={!!commentTask} onOpenChange={(o) => { if (!o) setCommentTask(null); }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Comments — {commentTask?.title}</DialogTitle>
-            <DialogDescription>View and add comments for this task.</DialogDescription>
+            <DialogTitle>Comments - {commentTask?.title}</DialogTitle>
+            <DialogDescription>Share updates with teammates.</DialogDescription>
           </DialogHeader>
           {commentTask && <CommentsSection task={commentTask} users={users} userId={user!.id} onCommentAdded={load} />}
         </DialogContent>
@@ -180,7 +298,28 @@ export default function Tasks() {
   );
 }
 
-function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: Project[]; task: Task | null; onSave: () => void }) {
+function MetricTile({ label, value, tone }: { label: string; value: number; tone?: string }) {
+  return (
+    <Card>
+      <CardContent className="p-4">
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className={`text-2xl font-semibold mt-1 ${tone || ''}`}>{value}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
+function TaskForm({
+  users,
+  projects,
+  task,
+  onSave,
+}: {
+  users: User[];
+  projects: Project[];
+  task: Task | null;
+  onSave: () => Promise<void>;
+}) {
   const { can, user } = useAuth();
   const [title, setTitle] = useState(task?.title || '');
   const [description, setDescription] = useState(task?.description || '');
@@ -189,19 +328,49 @@ function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: 
   const [priority, setPriority] = useState<Priority>(task?.priority || 'medium');
   const [status, setStatus] = useState<TaskStatus>(task?.status || 'pending');
   const [dueDate, setDueDate] = useState(task?.dueDate?.split('T')[0] || '');
+  const [errors, setErrors] = useState<{ title?: string; project?: string; assignee?: string; dueDate?: string }>({});
   const { toast } = useToast();
+
+  const validate = () => {
+    const nextErrors: { title?: string; project?: string; assignee?: string; dueDate?: string } = {};
+    if (!title.trim()) nextErrors.title = 'Title is required';
+    if (!projectId) nextErrors.project = 'Project is required';
+    if (!assignedTo) nextErrors.assignee = 'Assignee is required';
+    if (!dueDate) nextErrors.dueDate = 'Due date is required';
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!validate()) return;
+
     try {
       if (task) {
-        await api.updateTask(task.id, { title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
+        await api.updateTask(task.id, {
+          title,
+          description,
+          projectId,
+          assignedTo,
+          priority,
+          status,
+          dueDate: new Date(dueDate).toISOString(),
+        });
         toast({ title: 'Task updated' });
       } else {
-        await api.createTask({ title, description, projectId, assignedTo, priority, status, dueDate: new Date(dueDate).toISOString() });
+        await api.createTask({
+          title,
+          description,
+          projectId,
+          assignedTo,
+          priority,
+          status,
+          dueDate: new Date(dueDate).toISOString(),
+          createdBy: user?.id || assignedTo,
+        });
         toast({ title: 'Task created' });
       }
-      onSave();
+      await onSave();
     } catch (error) {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
@@ -209,47 +378,76 @@ function TaskForm({ users, projects, task, onSave }: { users: User[]; projects: 
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2"><Label>Title</Label><Input value={title} onChange={e => setTitle(e.target.value)} required /></div>
-      <div className="space-y-2"><Label>Description</Label><Textarea value={description} onChange={e => setDescription(e.target.value)} /></div>
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Project</Label>
+      <FloatingInput label="Task Title" value={title} onChange={(e) => setTitle(e.target.value)} error={errors.title} />
+      <FloatingTextarea label="Description" value={description} onChange={(e) => setDescription(e.target.value)} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-1.5">
           <Select value={projectId} onValueChange={setProjectId}>
-            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-            <SelectContent>{projects.map(p => <SelectItem key={p.id} value={p.id}>{p.title}</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Select Project" /></SelectTrigger>
+            <SelectContent>
+              {projects.map((project) => (
+                <SelectItem key={project.id} value={project.id}>{project.title}</SelectItem>
+              ))}
+            </SelectContent>
           </Select>
+          {errors.project ? <p className="text-xs text-destructive">{errors.project}</p> : null}
         </div>
-        <div className="space-y-2">
-          <Label>Assign To</Label>
+
+        <div className="space-y-1.5">
           <Select value={assignedTo} onValueChange={setAssignedTo} disabled={!can('tasks:assign')}>
-            <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
-            <SelectContent>{users.filter(u => u.status === 'active' && u.role === 'TEAM_MEMBER').map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Assign To" /></SelectTrigger>
+            <SelectContent>
+              {users.filter((u) => u.status === 'active' && u.role === 'TEAM_MEMBER').map((member) => (
+                <SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>
+              ))}
+            </SelectContent>
           </Select>
+          {errors.assignee ? <p className="text-xs text-destructive">{errors.assignee}</p> : null}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-4">
-        <div className="space-y-2">
-          <Label>Priority</Label>
-          <Select value={priority} onValueChange={v => setPriority(v as Priority)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent>
-          </Select>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Select value={priority} onValueChange={(value) => setPriority(value as Priority)}>
+          <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Priority" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="low">Low</SelectItem>
+            <SelectItem value="medium">Medium</SelectItem>
+            <SelectItem value="high">High</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select value={status} onValueChange={(value) => setStatus(value as TaskStatus)}>
+          <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="pending">To Do</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="completed">Done</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <div className="space-y-1.5">
+          <Input type="date" value={dueDate} onChange={(e) => setDueDate(e.target.value)} className="h-11 rounded-xl" />
+          {errors.dueDate ? <p className="text-xs text-destructive">{errors.dueDate}</p> : null}
         </div>
-        <div className="space-y-2">
-          <Label>Status</Label>
-          <Select value={status} onValueChange={v => setStatus(v as TaskStatus)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="pending">Pending</SelectItem><SelectItem value="in_progress">In Progress</SelectItem><SelectItem value="completed">Completed</SelectItem></SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2"><Label>Due Date</Label><Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} required /></div>
       </div>
-      <Button type="submit" className="w-full">{task ? 'Update' : 'Create'} Task</Button>
+
+      <Button type="submit" className="w-full">{task ? 'Save Changes' : 'Create Task'}</Button>
     </form>
   );
 }
 
-function CommentsSection({ task, users, userId, onCommentAdded }: { task: Task; users: User[]; userId: string; onCommentAdded: () => void }) {
+function CommentsSection({
+  task,
+  users,
+  userId,
+  onCommentAdded,
+}: {
+  task: Task;
+  users: User[];
+  userId: string;
+  onCommentAdded: () => Promise<void>;
+}) {
   const [comment, setComment] = useState('');
   const { toast } = useToast();
 
@@ -259,7 +457,7 @@ function CommentsSection({ task, users, userId, onCommentAdded }: { task: Task; 
       await api.addComment(task.id, userId, comment.trim());
       setComment('');
       toast({ title: 'Comment added' });
-      onCommentAdded();
+      await onCommentAdded();
     } catch (error) {
       toast({ title: extractErrorMessage(error), variant: 'destructive' });
     }
@@ -267,12 +465,14 @@ function CommentsSection({ task, users, userId, onCommentAdded }: { task: Task; 
 
   return (
     <div className="space-y-4">
-      <div className="max-h-60 overflow-y-auto space-y-3">
-        {task.comments.length === 0 && <p className="text-sm text-muted-foreground text-center py-4">No comments yet</p>}
-        {task.comments.map(c => (
-          <div key={c.id} className="rounded-lg bg-muted/50 p-3">
+      <div className="max-h-64 overflow-y-auto space-y-3 pr-1">
+        {task.comments.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-4">No comments yet</p>
+        )}
+        {task.comments.map((c) => (
+          <div key={c.id} className="rounded-xl border border-border/70 bg-muted/30 p-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-medium">{users.find(u => u.id === c.userId)?.name || 'Unknown'}</p>
+              <p className="text-xs font-medium">{users.find((u) => u.id === c.userId)?.name || 'Unknown'}</p>
               <p className="text-[10px] text-muted-foreground">{new Date(c.createdAt).toLocaleDateString()}</p>
             </div>
             <p className="text-sm mt-1">{c.content}</p>
@@ -280,8 +480,16 @@ function CommentsSection({ task, users, userId, onCommentAdded }: { task: Task; 
         ))}
       </div>
       <div className="flex gap-2">
-        <Input placeholder="Add a comment…" value={comment} onChange={e => setComment(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleAdd()} />
-        <Button size="icon" onClick={handleAdd}><Send className="h-4 w-4" /></Button>
+        <Input
+          placeholder="Write a comment"
+          value={comment}
+          onChange={(e) => setComment(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && handleAdd()}
+          className="rounded-xl"
+        />
+        <Button size="icon" className="rounded-xl" onClick={handleAdd}>
+          <Send className="h-4 w-4" />
+        </Button>
       </div>
     </div>
   );

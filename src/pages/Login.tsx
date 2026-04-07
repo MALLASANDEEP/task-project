@@ -2,12 +2,11 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Layers, Github, Chrome } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { FloatingInput } from '@/components/ui/floating-field';
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -30,14 +29,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 py-8">
+      <div className="absolute inset-0 subtle-grid opacity-25 pointer-events-none" />
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="flex items-center gap-2 text-primary">
             <Layers className="h-8 w-8" />
             <span className="text-2xl font-bold tracking-tight">TaskFlow</span>
           </div>
-          <p className="text-muted-foreground text-sm">Remote team task & project management</p>
+          <p className="text-muted-foreground text-sm">Plan work, track progress, and deliver faster.</p>
         </div>
 
         <Card>
@@ -47,14 +47,8 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" type="email" placeholder="you@example.com" value={email} onChange={e => setEmail(e.target.value)} required />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" type="password" placeholder="••••••••" value={password} onChange={e => setPassword(e.target.value)} required />
-              </div>
+              <FloatingInput id="email" type="email" label="Email" value={email} onChange={e => setEmail(e.target.value)} required />
+              <FloatingInput id="password" type="password" label="Password" value={password} onChange={e => setPassword(e.target.value)} required />
               <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Signing in…' : 'Sign in'}</Button>
             </form>
 
@@ -76,12 +70,12 @@ export default function LoginPage() {
           </CardFooter>
         </Card>
 
-        <div className="rounded-lg border bg-muted/50 p-3 text-xs text-muted-foreground space-y-1">
+        <div className="rounded-2xl border border-border/70 bg-card/80 p-4 text-xs text-muted-foreground space-y-1 shadow-sm">
           <p className="font-medium">Demo Credentials</p>
-          <p>ADMIN: admin@taskflow.io / admin123</p>
-          <p>PROJECT_MANAGER: priya@taskflow.io / user123</p>
-          <p>TEAM_MEMBER: rohan@taskflow.io / user123</p>
-          <p>VIEWER: sneha@taskflow.io / user123</p>
+          <p>ADMIN: admin@example.com / password123</p>
+          <p>PROJECT_MANAGER: pm@example.com / password123</p>
+          <p>TEAM_MEMBER: member@example.com / password123</p>
+          <p>VIEWER: viewer@example.com / password123</p>
         </div>
       </div>
     </div>

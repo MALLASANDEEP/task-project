@@ -3,11 +3,10 @@ import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
+import { FloatingInput, FloatingTextarea } from '@/components/ui/floating-field';
 import { PriorityBadge } from '@/pages/Dashboard';
 import * as api from '@/services/api';
 import { Project, User, Priority } from '@/types';
@@ -139,12 +138,20 @@ function ProjectForm({ users, project, onSave }: { users: User[]; project: Proje
   const [priority, setPriority] = useState<Priority>(project?.priority || 'medium');
   const [deadline, setDeadline] = useState(project?.deadline?.split('T')[0] || '');
   const [assigned, setAssigned] = useState<string[]>(project?.assignedUsers || []);
+  const [errors, setErrors] = useState<{ title?: string; deadline?: string }>({});
   const { toast } = useToast();
 
   const toggle = (id: string) => setAssigned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const nextErrors: { title?: string; deadline?: string } = {};
+    if (!title.trim()) nextErrors.title = 'Project title is required';
+    if (!deadline) nextErrors.deadline = 'Deadline is required';
+    setErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) return;
+
     try {
       if (project) {
         await api.updateProject(project.id, { title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned });
@@ -161,20 +168,22 @@ function ProjectForm({ users, project, onSave }: { users: User[]; project: Proje
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-2"><Label>Title</Label><Input value={title} onChange={e => setTitle(e.target.value)} required /></div>
-      <div className="space-y-2"><Label>Description</Label><Textarea value={description} onChange={e => setDescription(e.target.value)} /></div>
+      <FloatingInput label="Project Title" value={title} onChange={e => setTitle(e.target.value)} error={errors.title} />
+      <FloatingTextarea label="Description" value={description} onChange={e => setDescription(e.target.value)} />
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Priority</Label>
           <Select value={priority} onValueChange={v => setPriority(v as Priority)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Priority" /></SelectTrigger>
             <SelectContent><SelectItem value="low">Low</SelectItem><SelectItem value="medium">Medium</SelectItem><SelectItem value="high">High</SelectItem></SelectContent>
           </Select>
         </div>
-        <div className="space-y-2"><Label>Deadline</Label><Input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} required /></div>
+        <div className="space-y-1.5">
+          <Input type="date" value={deadline} onChange={e => setDeadline(e.target.value)} className="h-11 rounded-xl" />
+          {errors.deadline ? <p className="text-xs text-destructive">{errors.deadline}</p> : null}
+        </div>
       </div>
       <div className="space-y-2">
-        <Label>Assign Members</Label>
+        <p className="text-sm text-muted-foreground">Assign Members</p>
         <div className="flex flex-wrap gap-2">
           {users.filter(u => u.role === 'TEAM_MEMBER' && u.status === 'active').map(u => (
             <Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>

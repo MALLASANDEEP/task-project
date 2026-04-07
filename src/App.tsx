@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/AppLayout";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
+import Analytics from "./pages/Analytics";
 import Projects from "./pages/Projects";
 import Teams from "./pages/Teams";
 import Tasks from "./pages/Tasks";
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/register" element={<RegisterPage />} />
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />} />
+              <Route path="/analytics" element={<Analytics />} />
               <Route path="/projects" element={<Projects />} />
               <Route path="/teams" element={<ProtectedRoute requiredPermission="teams:manage"><Teams /></ProtectedRoute>} />
               <Route path="/tasks" element={<Tasks />} />

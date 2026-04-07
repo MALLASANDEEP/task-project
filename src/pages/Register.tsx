@@ -2,11 +2,10 @@ import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Layers } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { FloatingInput } from '@/components/ui/floating-field';
 
 export default function RegisterPage() {
   const [name, setName] = useState('');
@@ -27,7 +26,8 @@ export default function RegisterPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background px-4">
+    <div className="min-h-screen flex items-center justify-center px-4 py-8">
+      <div className="absolute inset-0 subtle-grid opacity-25 pointer-events-none" />
       <div className="w-full max-w-md space-y-6">
         <div className="flex flex-col items-center gap-2">
           <div className="flex items-center gap-2 text-primary">
@@ -42,9 +42,9 @@ export default function RegisterPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2"><Label htmlFor="name">Full Name</Label><Input id="name" value={name} onChange={e => setName(e.target.value)} required /></div>
-              <div className="space-y-2"><Label htmlFor="email">Email</Label><Input id="email" type="email" value={email} onChange={e => setEmail(e.target.value)} required /></div>
-              <div className="space-y-2"><Label htmlFor="password">Password</Label><Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} /></div>
+              <FloatingInput id="name" label="Full Name" value={name} onChange={e => setName(e.target.value)} required />
+              <FloatingInput id="email" type="email" label="Email" value={email} onChange={e => setEmail(e.target.value)} required />
+              <FloatingInput id="password" type="password" label="Password" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
               <Button type="submit" className="w-full" disabled={loading}>{loading ? 'Creating…' : 'Create account'}</Button>
             </form>
           </CardContent>
