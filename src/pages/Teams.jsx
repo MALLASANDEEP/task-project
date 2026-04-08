@@ -52,7 +52,7 @@ export default function Teams() {
     useEffect(() => {
         load();
       }, [load]);
-    const activeUsers = useMemo(() => users.filter((teamMember) => teamMember.status === 'active' && teamMember.role === 'TEAM_MEMBER'), [users]);
+    const activeUsers = useMemo(() => users.filter((teamMember) => teamMember.status === 'active' && teamMember.role !== 'TEAM_MEMBER'), [users]);
     const filteredTeams = teams.filter((team) => {
         const query = search.toLowerCase();
         return team.name.toLowerCase().includes(query) || team.description.toLowerCase().includes(query);
@@ -94,8 +94,8 @@ export default function Teams() {
               New Team
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
+          <DialogContent className="max-w-3xl overflow-hidden p-0">
+            <DialogHeader className="sticky top-0 z-10 border-b bg-background px-6 py-4">
               <DialogTitle>{editingTeam ? 'Edit Team' : 'Create Team'}</DialogTitle>
               <DialogDescription>{editingTeam ? 'Update the team details and members below.' : 'Create a new team and assign members to shared projects.'}</DialogDescription>
             </DialogHeader>
@@ -235,42 +235,52 @@ function TeamForm({ team, users, projects, currentUserId, onSave, }) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
     };
-    return (<form onSubmit={handleSubmit} className="space-y-5">
-      <div className="space-y-2">
-        <Label>Team name</Label>
-        <Input value={name} onChange={(event) => setName(event.target.value)} required/>
-      </div>
+    return (<form onSubmit={handleSubmit} className="flex max-h-[80vh] min-h-0 flex-col">
+      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-6 py-5">
+        <div className="space-y-2">
+          <Label>Team name</Label>
+          <Input value={name} onChange={(event) => setName(event.target.value)} required/>
+        </div>
 
-      <div className="space-y-2">
-        <Label>Description</Label>
-        <Textarea value={description} onChange={(event) => setDescription(event.target.value)} required/>
-      </div>
+        <div className="space-y-2">
+          <Label>Description</Label>
+          <Textarea value={description} onChange={(event) => setDescription(event.target.value)} required/>
+        </div>
 
-      <div className="space-y-2">
-        <Label>Assign users</Label>
-        <ScrollArea className="h-40 rounded-md border p-3">
-          <div className="flex flex-wrap gap-2">
-            {users.map((teamUser) => (<Button key={teamUser.id} type="button" variant={members.includes(teamUser.id) ? 'default' : 'outline'} size="sm" onClick={() => toggleItem(teamUser.id, members, setMembers)}>
-                {teamUser.name}
-              </Button>))}
+        <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <Label>Assign users</Label>
+            <span className="text-xs text-muted-foreground">{members.length} selected</span>
           </div>
-        </ScrollArea>
-      </div>
+          <ScrollArea className="h-48 rounded-md border bg-background p-3">
+            <div className="flex flex-wrap gap-2">
+              {users.map((teamUser) => (<Button key={teamUser.id} type="button" variant={members.includes(teamUser.id) ? 'default' : 'outline'} size="sm" onClick={() => toggleItem(teamUser.id, members, setMembers)}>
+                  {teamUser.name}
+                </Button>))}
+            </div>
+          </ScrollArea>
+        </div>
 
-      <div className="space-y-2">
-        <Label>Assign projects</Label>
-        <ScrollArea className="h-40 rounded-md border p-3">
-          <div className="flex flex-wrap gap-2">
-            {projects.map((project) => (<Button key={project.id} type="button" variant={linkedProjects.includes(project.id) ? 'default' : 'outline'} size="sm" onClick={() => toggleItem(project.id, linkedProjects, setLinkedProjects)}>
-                {project.title}
-              </Button>))}
+        <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+          <div className="mb-3 flex items-center justify-between">
+            <Label>Assign projects</Label>
+            <span className="text-xs text-muted-foreground">{linkedProjects.length} selected</span>
           </div>
-        </ScrollArea>
+          <ScrollArea className="h-48 rounded-md border bg-background p-3">
+            <div className="flex flex-wrap gap-2">
+              {projects.map((project) => (<Button key={project.id} type="button" variant={linkedProjects.includes(project.id) ? 'default' : 'outline'} size="sm" onClick={() => toggleItem(project.id, linkedProjects, setLinkedProjects)}>
+                  {project.title}
+                </Button>))}
+            </div>
+          </ScrollArea>
+        </div>
       </div>
 
-      <Button type="submit" className="w-full">
-        {team ? 'Update' : 'Create'} Team
-      </Button>
+      <div className="sticky bottom-0 z-10 border-t bg-background/95 px-6 py-4 backdrop-blur">
+        <Button type="submit" className="w-full">
+          {team ? 'Update' : 'Create'} Team
+        </Button>
+      </div>
     </form>);
 }
 

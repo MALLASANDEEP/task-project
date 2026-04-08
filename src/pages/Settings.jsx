@@ -9,7 +9,7 @@ import { useToast } from '@/hooks/use-toast';
 import { roleLabel } from '@/lib/rbac';
 export default function SettingsPage() {
     const { user, updateProfile } = useAuth();
-    const isViewer = user?.role === 'VIEWER';
+  const isViewer = user?.role === 'TEAM_MEMBER';
     const [name, setName] = useState(user?.name || '');
     const [email, setEmail] = useState(user?.email || '');
     const [currentPw, setCurrentPw] = useState('');
@@ -19,7 +19,7 @@ export default function SettingsPage() {
     const handleProfile = (e) => {
         e.preventDefault();
         if (isViewer) {
-            toast({ title: 'VIEWER role is read-only', variant: 'destructive' });
+          toast({ title: 'TEAM_MEMBER role is read-only', variant: 'destructive' });
             return;
         }
         updateProfile({ name, email });
@@ -28,7 +28,7 @@ export default function SettingsPage() {
     const handlePassword = (e) => {
         e.preventDefault();
         if (isViewer) {
-            toast({ title: 'VIEWER role is read-only', variant: 'destructive' });
+          toast({ title: 'TEAM_MEMBER role is read-only', variant: 'destructive' });
             return;
         }
         if (newPw !== confirmPw) {

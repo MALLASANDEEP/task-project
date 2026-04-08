@@ -1,8 +1,9 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import * as api from '@/services/api';
-import { hasPermission } from '@/lib/rbac';
+import { hasPermission, normalizeRole } from '@/lib/rbac';
 const AuthContext = createContext(null);
 export function AuthProvider({ children }) {
+    const [isAuthReady, setIsAuthReady] = useState(false);
     const [state, setState] = useState(() => {
         const stored = localStorage.getItem('taskflow_auth');
         const initialState = stored
@@ -40,6 +41,7 @@ export function AuthProvider({ children }) {
                     : previous);
                 api.setActiveUserId(null);
             }
+            setIsAuthReady(true);
         }
         restore();
         return () => {
@@ -63,13 +65,13 @@ export function AuthProvider({ children }) {
         try {
             const result = await api.register(name, email, password);
             if (!result)
-                return false;
+                return null;
             api.setActiveUserId(result.user.id);
             setState({ user: result.user, token: result.token, isAuthenticated: true });
-            return true;
+            return result.user;
         } catch (err) {
             console.error('[AuthContext] Register error:', err);
-            return false;
+            return null;
         }
     }, []);
     const logout = useCallback(async () => {
@@ -82,7 +84,7 @@ export function AuthProvider({ children }) {
     useEffect(() => {
         api.setActiveUserId(state.user?.id || null);
     }, [state.user?.id]);
-    const role = state.user?.role || null;
+    const role = normalizeRole(state.user?.role || null);
     const isAdmin = role === 'ADMIN';
     const hasRole = useCallback((roles) => {
         if (!role)
@@ -94,7 +96,7 @@ export function AuthProvider({ children }) {
             return false;
         return hasPermission(role, permission);
     }, [role]);
-    return (<AuthContext.Provider value={{ ...state, login: loginFn, register: registerFn, logout, updateProfile, isAdmin, role, hasRole, can }}>
+        return (<AuthContext.Provider value={{ ...state, isAuthReady, login: loginFn, register: registerFn, logout, updateProfile, isAdmin, role, hasRole, can }}>
       {children}
     </AuthContext.Provider>);
 }

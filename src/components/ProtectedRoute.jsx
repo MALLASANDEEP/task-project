@@ -1,7 +1,9 @@
 import { Navigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 export function ProtectedRoute({ children, adminOnly = false, allowedRoles, requiredPermission, }) {
-    const { isAuthenticated, isAdmin, hasRole, can } = useAuth();
+    const { isAuthenticated, isAuthReady, isAdmin, hasRole, can } = useAuth();
+    if (!isAuthReady)
+        return <div className="min-h-[40vh]" />;
     if (!isAuthenticated)
         return <Navigate to="/login" replace/>;
     if (adminOnly && !isAdmin)

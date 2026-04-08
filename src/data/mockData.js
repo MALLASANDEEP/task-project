@@ -1,9 +1,11 @@
 export const mockUsers = [
     { id: 'u1', name: 'Aarav Sharma', email: 'admin@taskflow.io', role: 'ADMIN', status: 'active', avatar: '', createdAt: '2025-01-10T08:00:00Z' },
     { id: 'u2', name: 'Priya Patel', email: 'priya@taskflow.io', role: 'PROJECT_MANAGER', status: 'active', avatar: '', createdAt: '2025-02-14T10:30:00Z' },
-    { id: 'u3', name: 'Rohan Mehta', email: 'rohan@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-03-01T09:15:00Z' },
-    { id: 'u4', name: 'Sneha Gupta', email: 'sneha@taskflow.io', role: 'VIEWER', status: 'active', avatar: '', createdAt: '2025-03-20T14:00:00Z' },
-    { id: 'u5', name: 'Vikram Singh', email: 'vikram@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-04-05T11:45:00Z' },
+    { id: 'u3', name: 'Rohan Mehta', email: 'rohan@taskflow.io', role: 'TEAM_LEADER', status: 'active', avatar: '', createdAt: '2025-03-01T09:15:00Z' },
+    { id: 'u4', name: 'Sneha Gupta', email: 'sneha@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-03-20T14:00:00Z' },
+    { id: 'u5', name: 'Vikram Singh', email: 'vikram@taskflow.io', role: 'TEAM_LEADER', status: 'active', avatar: '', createdAt: '2025-04-05T11:45:00Z' },
+    { id: 'u6', name: 'Ananya Das', email: 'ananya@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-04-10T13:20:00Z' },
+    { id: 'u7', name: 'Karan Verma', email: 'karan@taskflow.io', role: 'TEAM_MEMBER', status: 'active', avatar: '', createdAt: '2025-04-18T15:45:00Z' },
 ];
 export const mockProjects = [
     { id: 'p1', title: 'Website Redesign', description: 'Complete overhaul of the company website with modern design and improved UX.', createdBy: 'u1', assignedUsers: ['u2', 'u3', 'u5'], deadline: '2026-06-30T00:00:00Z', priority: 'high', createdAt: '2025-05-01T08:00:00Z' },

@@ -1,0 +1,274 @@
+/**
+ * ChatBox Animations and Styles
+ * Smooth, production-grade messaging UI animations
+ */
+
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes typingDot {
+  0%, 60%, 100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  30% {
+    opacity: 1;
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes slidIn {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes pulseRing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(59, 130, 246, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(59, 130, 246, 0);
+  }
+}
+
+/* Message Animation */
+.animate-message-in {
+  animation: messageIn 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Message Group Animation */
+.message-group {
+  animation: slidIn 0.2s ease-out;
+}
+
+/* Typing Indicators */
+.typing-indicator {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 8px 12px;
+  background: var(--muted);
+  border-radius: 999px;
+  width: fit-content;
+}
+
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted-foreground);
+  animation: typingDot 1.4s infinite;
+}
+
+.typing-dot:nth-child(2) {
+  animation-delay: 0.2s;
+}
+
+.typing-dot:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* Message Status Icons */
+.message-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s;
+}
+
+.message-status:hover {
+  opacity: 1;
+}
+
+/* Call Notification */
+.call-notification {
+  animation: slidIn 0.3s ease-out;
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary)/80% 100%);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.call-notification button {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.call-notification button:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Scroll Area Customization */
+.chatbox-scroll-area {
+  scroll-behavior: smooth;
+}
+
+.chatbox-scroll-area::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chatbox-scroll-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chatbox-scroll-area::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+
+.chatbox-scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Message Input Focus Effect */
+.message-input:focus {
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+}
+
+/* Loading Skeleton */
+.message-skeleton {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Real-time Sync Indicator */
+.sync-status {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted-foreground);
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.sync-status.syncing {
+  opacity: 1;
+}
+
+.sync-indicator {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--yellow-500);
+  animation: pulse 1.5s infinite;
+}
+
+.sync-indicator.synced {
+  background: var(--green-500);
+  animation: none;
+}
+
+/* Message Delivery Animation */
+.message-delivering {
+  opacity: 0.6;
+  position: relative;
+}
+
+.message-delivering::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 2px;
+  height: 100%;
+  background: var(--primary);
+  border-radius: 999px;
+  animation: pulse 1s infinite;
+}
+
+/* Unread Badge */
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  animation: slideIn 0.2s ease-out;
+}
+
+/* Night Mode Support */
+@media (prefers-color-scheme: dark) {
+  .typing-indicator {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .typing-dot {
+    background: rgba(255, 255, 255, 0.4);
+  }
+
+  .call-notification {
+    background: linear-gradient(135deg, rgba(59, 130, 246, 0.8) 0%, rgba(59, 130, 246, 0.6) 100%);
+  }
+}
+
+/* Responsive Adjustments */
+@media (max-width: 640px) {
+  .message-bubble {
+    max-width: 85%;
+  }
+
+  .typing-indicator {
+    font-size: 12px;
+  }
+
+  .call-notification {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .call-notification button {
+    align-self: flex-end;
+  }
+}
+
+/* Accessibility: Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
+  .animate-message-in,
+  .message-group,
+  .typing-dot,
+  .message-delivering::after,
+  .call-notification,
+  .sync-indicator {
+    animation: none;
+  }
+
+  .message-input:focus,
+  .message-bubble {
+    transition: none;
+  }
+}

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { FloatingInput, FloatingTextarea } from '@/components/ui/floating-field';
 import { PriorityBadge } from '@/pages/Dashboard';
@@ -27,7 +27,7 @@ export default function Projects() {
     const load = useCallback(async () => {
       setIsLoading(true);
         try {
-            const projectsData = role === 'TEAM_MEMBER' ? await api.getProjectsForUser(user.id) : await api.getProjects();
+            const projectsData = role === 'TEAM_LEADER' ? await api.getProjectsForUser(user.id) : await api.getProjects();
             setProjects(projectsData);
         }
         catch (error) {
@@ -63,14 +63,19 @@ export default function Projects() {
     return (<div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold">{role === 'TEAM_MEMBER' ? 'My Projects' : 'Projects'}</h1>
+          <h1 className="text-2xl font-bold">{role === 'TEAM_LEADER' ? 'My Projects' : 'Projects'}</h1>
           <p className="text-muted-foreground text-sm mt-1">{filtered.length} project{filtered.length !== 1 ? 's' : ''}</p>
         </div>
         {can('projects:create') && (<Dialog open={dialogOpen} onOpenChange={(o) => { setDialogOpen(o); if (!o)
             setEditing(null); }}>
             <DialogTrigger asChild><Button className="gap-2"><Plus className="h-4 w-4"/> New Project</Button></DialogTrigger>
             <DialogContent>
-              <DialogHeader><DialogTitle>{editing ? 'Edit Project' : 'Create Project'}</DialogTitle></DialogHeader>
+              <DialogHeader>
+                <DialogTitle>{editing ? 'Edit Project' : 'Create Project'}</DialogTitle>
+                <DialogDescription className="sr-only">
+                  {editing ? 'Update project details, manager, and team members.' : 'Create a new project and assign manager and team members.'}
+                </DialogDescription>
+              </DialogHeader>
               <ProjectForm users={users} project={editing} onSave={() => { setDialogOpen(false); setEditing(null); load(); }}/>
             </DialogContent>
           </Dialog>)}
@@ -183,7 +188,7 @@ function ProjectForm({ users, project, onSave }) {
     };
     const activeUsers = users.filter(u => u.status === 'active');
     const managers = activeUsers.filter(u => ['PROJECT_MANAGER', 'ADMIN'].includes(u.role));
-    const teamMembers = activeUsers.filter(u => u.role === 'TEAM_MEMBER');
+    const assignableUsers = activeUsers;
     return (<form onSubmit={handleSubmit} className="space-y-4">
       <FloatingInput label="Project Title" value={title} onChange={e => setTitle(e.target.value)} error={errors.title}/>
       <FloatingTextarea label="Description" value={description} onChange={e => setDescription(e.target.value)}/>
@@ -213,7 +218,7 @@ function ProjectForm({ users, project, onSave }) {
       <div className="space-y-2">
         <p className="text-sm text-muted-foreground">Assign Team Members</p>
         <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
-          {teamMembers.map(u => (<Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>
+          {assignableUsers.map(u => (<Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>
               {u.name}
             </Badge>))}
         </div>

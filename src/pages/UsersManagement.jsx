@@ -12,6 +12,12 @@ import { Plus, Search, Pencil, Trash2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { extractErrorMessage, roleLabel } from '@/lib/rbac';
 export default function UsersPage() {
+    const rolePriority = {
+      ADMIN: 1,
+      PROJECT_MANAGER: 2,
+      TEAM_LEADER: 3,
+      TEAM_MEMBER: 4,
+    };
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState('');
     const [dialogOpen, setDialogOpen] = useState(false);
@@ -32,7 +38,14 @@ export default function UsersPage() {
         }
       }, [toast]);
       useEffect(() => { load(); }, [load]);
-    const filtered = users.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()));
+    const filtered = users
+      .filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()))
+      .sort((a, b) => {
+        const roleDiff = (rolePriority[a.role] || 99) - (rolePriority[b.role] || 99);
+        if (roleDiff !== 0)
+          return roleDiff;
+        return String(a.name || '').localeCompare(String(b.name || ''));
+      });
     const toggleStatus = async (u) => {
         const newStatus = u.status === 'active' ? 'inactive' : 'active';
         try {
@@ -46,8 +59,13 @@ export default function UsersPage() {
     };
     const handleDelete = async (id) => {
         try {
-            await api.deleteUser(id);
-            toast({ title: 'User deleted' });
+        const result = await api.deleteUser(id);
+        if (result?.softDeleted) {
+          toast({ title: 'User has linked records, so account was deactivated instead' });
+        }
+        else {
+          toast({ title: 'User deleted' });
+        }
             load();
         }
         catch (error) {
@@ -118,7 +136,7 @@ export default function UsersPage() {
 function UserForm({ user, onSave }) {
     const [name, setName] = useState(user?.name || '');
     const [email, setEmail] = useState(user?.email || '');
-    const [role, setRole] = useState(user?.role || 'TEAM_MEMBER');
+    const [role, setRole] = useState(user?.role || 'TEAM_LEADER');
     const [status, setStatus] = useState(user?.status || 'active');
     const [errors, setErrors] = useState({});
     const { toast } = useToast();
@@ -157,8 +175,8 @@ function UserForm({ user, onSave }) {
             <SelectContent>
               <SelectItem value="ADMIN">ADMIN</SelectItem>
               <SelectItem value="PROJECT_MANAGER">PROJECT_MANAGER</SelectItem>
+              <SelectItem value="TEAM_LEADER">TEAM_LEADER</SelectItem>
               <SelectItem value="TEAM_MEMBER">TEAM_MEMBER</SelectItem>
-              <SelectItem value="VIEWER">VIEWER</SelectItem>
             </SelectContent>
           </Select>
         </div>

@@ -3,13 +3,16 @@
  * Connected to Supabase backend with PostgreSQL + Row Level Security
  */
 import { supabase } from '@/lib/supabase';
-import { AuthorizationError, hasPermission } from '@/lib/rbac';
+import { AuthorizationError, hasPermission, normalizeRole, toDbRole } from '@/lib/rbac';
 let activeUserId = null;
+let viewerRoleSupported = false;
+const CALLS_ENABLED = import.meta.env.VITE_ENABLE_CALLS !== 'false';
 let typingStates = [];
 let projects = [];
 let conversations = [];
 let chatMessages = [];
 let callSessions = [];
+let callsFeatureUnavailable = false;
 function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
@@ -24,6 +27,28 @@ function shouldRetry(error) {
         message.includes('timeout') ||
         message.includes('temporarily') ||
         message.includes('fetch');
+}
+function isMissingRelationError(error, relationName) {
+    if (!error)
+        return false;
+    const code = String(error.code || error.status || '').toLowerCase();
+    const message = String(error.message || '').toLowerCase();
+    if (code === '42p01')
+        return true;
+    return message.includes('does not exist') && message.includes(relationName.toLowerCase());
+}
+function markCallsFeatureUnavailable(error) {
+    if (isMissingRelationError(error, 'calls')) {
+        callsFeatureUnavailable = true;
+        console.warn('[CALLS] calls table not available. Calls feature disabled.');
+        return true;
+    }
+    if (isMissingRelationError(error, 'call_participants')) {
+        callsFeatureUnavailable = true;
+        console.warn('[CALLS] call_participants table not available. Calls feature disabled.');
+        return true;
+    }
+    return false;
 }
 async function withRetry(operation, options = {}) {
     const retries = options.retries ?? 2;
@@ -62,6 +87,39 @@ function mapNotificationRow(row) {
         createdAt: row.created_at,
     };
 }
+function isInvalidRoleValueError(error) {
+    const code = String(error?.code || '').toLowerCase();
+    const message = String(error?.message || '').toLowerCase();
+    return code === '22p02' || (message.includes('invalid input value') && message.includes('enum'));
+}
+function mapRoleFromDb(role) {
+    if (!role)
+        return role;
+    if (role === 'VIEWER')
+        return 'TEAM_MEMBER';
+    // Only convert TEAM_MEMBER to TEAM_LEADER if we've confirmed VIEWER is supported
+    // (this means TEAM_MEMBER is old data from when TEAM_LEADER was stored as TEAM_MEMBER)
+    if (role === 'TEAM_MEMBER' && viewerRoleSupported === true)
+        return 'TEAM_LEADER';
+    return role;
+}
+function mapRoleToDb(role) {
+    const normalized = normalizeRole(role);
+    if (normalized === 'TEAM_MEMBER' && !viewerRoleSupported) {
+        return 'TEAM_MEMBER';
+    }
+    return toDbRole(normalized);
+}
+function mapProfileRow(profile) {
+    return {
+        id: profile.id,
+        name: profile.name,
+        email: profile.email,
+        role: mapRoleFromDb(profile.role),
+        status: profile.status,
+        createdAt: profile.created_at,
+    };
+}
 async function requireUser() {
     if (!activeUserId)
         throw new AuthorizationError('Authentication required');
@@ -70,10 +128,10 @@ async function requireUser() {
         .from('profiles')
         .select('*')
         .eq('id', activeUserId)
-        .single());
+        .maybeSingle());
     if (error || !data)
         throw new AuthorizationError('Authentication required');
-    return { id: data.id, name: data.name, email: data.email, role: data.role, status: data.status, createdAt: data.created_at };
+    return mapProfileRow(data);
 }
 async function requirePermission(permission) {
     const user = await requireUser();
@@ -87,7 +145,7 @@ function assertTaskTransition(current, next) {
     const currentIndex = order.indexOf(current);
     const nextIndex = order.indexOf(next);
     if (nextIndex < currentIndex) {
-        throw new AuthorizationError('TEAM_MEMBER cannot move task status backwards');
+        throw new AuthorizationError('TEAM_LEADER cannot move task status backwards');
     }
 }
 export function setActiveUserId(userId) {
@@ -104,6 +162,16 @@ export function subscribeCommunicationEvents(listener) {
     };
 }
 export function subscribeToActiveCalls(onUpdate) {
+    if (!CALLS_ENABLED) {
+        return () => {
+            // Calls feature disabled
+        };
+    }
+    if (callsFeatureUnavailable) {
+        return () => {
+            // Calls disabled by schema detection
+        };
+    }
     if (supabase) {
         const channel = supabase
             .channel(`calls:${activeUserId || 'anon'}:${Date.now()}`)
@@ -145,8 +213,60 @@ function mapMessageRow(row, receiptRows = []) {
         createdAt: row.created_at,
     };
 }
+function mapCallRow(row, participantRows = []) {
+    return {
+        id: row.id,
+        conversationId: row.conversation_id,
+        initiatedBy: row.initiated_by || row.initiator_id,
+        participants: participantRows
+            .filter((participant) => participant.call_id === row.id)
+            .map((participant) => participant.user_id),
+        type: row.call_type,
+        status: row.status || row.call_status || 'ringing',
+        startedAt: row.started_at,
+        endedAt: row.ended_at || undefined,
+    };
+}
+function dedupeConversationsByScope(items, currentUserId) {
+    const deduped = new Map();
+    (items || []).forEach((conversation) => {
+        let key = conversation.id;
+        if (conversation.type === 'direct') {
+            const otherId = (conversation.participants || []).find((participantId) => participantId !== currentUserId) || conversation.id;
+            key = `direct:${otherId}`;
+        }
+        else if (conversation.type === 'project') {
+            key = `project:${conversation.projectId || conversation.id}`;
+        }
+        else if (conversation.type === 'team') {
+            key = `team:${conversation.teamId || conversation.title || conversation.id}`;
+        }
+        const existing = deduped.get(key);
+        if (!existing) {
+            deduped.set(key, conversation);
+            return;
+        }
+        const existingTs = new Date(existing.lastMessageAt || existing.createdAt || 0).getTime();
+        const currentTs = new Date(conversation.lastMessageAt || conversation.createdAt || 0).getTime();
+        if (currentTs >= existingTs) {
+            deduped.set(key, conversation);
+        }
+    });
+    return Array.from(deduped.values()).sort((a, b) => {
+        const aTs = new Date(a.lastMessageAt || a.createdAt || 0).getTime();
+        const bTs = new Date(b.lastMessageAt || b.createdAt || 0).getTime();
+        return bTs - aTs;
+    });
+}
 function buildDirectMessageFilter(currentUserId, otherUserId) {
     return `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`;
+}
+function isMissingColumnError(error, columnName) {
+    if (!error)
+        return false;
+    const code = String(error.code || error.status || '').toLowerCase();
+    const message = String(error.message || '').toLowerCase();
+    return code === '42703' || (message.includes('column') && message.includes(columnName.toLowerCase()) && message.includes('does not exist'));
 }
 export function subscribeToConversationMessages(conversationId, onMessage) {
     if (!conversationId) {
@@ -251,7 +371,7 @@ export async function login(email, password) {
             .from('profiles')
             .select('*')
             .eq('id', data.user.id)
-            .single();
+            .maybeSingle();
         if (profileError) {
             console.error('[LOGIN] Profile fetch error:', profileError.message);
             return null;
@@ -260,14 +380,7 @@ export async function login(email, password) {
             console.error('[LOGIN] Profile not found or inactive');
             return null;
         }
-        const user = {
-            id: profile.id,
-            name: profile.name,
-            email: profile.email,
-            role: profile.role,
-            status: profile.status,
-            createdAt: profile.created_at
-        };
+        const user = mapProfileRow(profile);
         activeUserId = user.id;
         await writeAudit('LOGIN', 'auth', user.id);
         return { user, token: data.session?.access_token || '' };
@@ -285,7 +398,7 @@ export async function register(name, email, password) {
             options: {
                 data: {
                     name,
-                    role: 'TEAM_MEMBER'
+                    role: mapRoleToDb('TEAM_MEMBER')
                 }
             }
         });
@@ -316,29 +429,43 @@ export async function register(name, email, password) {
                     id: data.user.id,
                     name,
                     email,
-                    role: 'TEAM_MEMBER',
+                    role: mapRoleToDb('TEAM_MEMBER'),
                     status: 'active'
                 }])
                 .select()
                 .single();
-            if (insertError) {
+            if (insertError && isInvalidRoleValueError(insertError)) {
+                viewerRoleSupported = false;
+                const retryInsert = await supabase
+                    .from('profiles')
+                    .insert([{
+                    id: data.user.id,
+                    name,
+                    email,
+                    role: 'TEAM_MEMBER',
+                    status: 'active'
+                }])
+                    .select()
+                    .single();
+                if (retryInsert.error) {
+                    console.error('[REGISTER] Profile creation error:', retryInsert.error.message);
+                    return null;
+                }
+                profile = retryInsert.data;
+            }
+            else if (insertError) {
                 console.error('[REGISTER] Profile creation error:', insertError.message);
                 return null;
             }
-            profile = newProfile;
+            else {
+                profile = newProfile;
+            }
         }
         if (!profile) {
             console.error('[REGISTER] Profile is null');
             return null;
         }
-        const user = {
-            id: profile.id,
-            name: profile.name,
-            email: profile.email,
-            role: profile.role,
-            status: profile.status,
-            createdAt: profile.created_at
-        };
+        const user = mapProfileRow(profile);
         activeUserId = user.id;
         await writeAudit('REGISTER', 'auth', user.id);
         return { user, token: data.session?.access_token || '' };
@@ -358,17 +485,10 @@ export async function restoreSession() {
         .from('profiles')
         .select('*')
         .eq('id', session.user.id)
-        .single();
+        .maybeSingle();
     if (profileError || !profile)
         return null;
-    const user = {
-        id: profile.id,
-        name: profile.name,
-        email: profile.email,
-        role: profile.role,
-        status: profile.status,
-        createdAt: profile.created_at,
-    };
+    const user = mapProfileRow(profile);
     activeUserId = user.id;
     return { user, token: session.access_token || '' };
 }
@@ -385,7 +505,11 @@ export async function getUsers() {
     const { data, error } = await supabase.from('profiles').select('*');
     if (error)
         throw error;
-    return data.map(p => ({ id: p.id, name: p.name, email: p.email, role: p.role, status: p.status, createdAt: p.created_at }));
+    // Detect if VIEWER enum is supported by checking if any profiles have VIEWER role
+    if (data && data.some(p => p.role === 'VIEWER')) {
+        viewerRoleSupported = true;
+    }
+    return data.map((p) => mapProfileRow(p));
 }
 export async function getUserById(id) {
     const actor = await requireUser();
@@ -394,28 +518,46 @@ export async function getUserById(id) {
     const { data, error } = await supabase.from('profiles').select('*').eq('id', id).single();
     if (error)
         return undefined;
-    return data ? { id: data.id, name: data.name, email: data.email, role: data.role, status: data.status, createdAt: data.created_at } : undefined;
+    return data ? mapProfileRow(data) : undefined;
 }
 export async function createUser(data) {
     await requirePermission('users:manage');
     // Note: This should be handled via Supabase admin API or auth endpoint, not direct insert
     const { data: newProfile, error } = await supabase
         .from('profiles')
-        .insert([{ name: data.name, email: data.email, role: data.role, status: data.status }])
+        .insert([{ name: data.name, email: data.email, role: mapRoleToDb(data.role), status: data.status }])
         .select()
         .single();
+    
+    // Retry fallback for TEAM_MEMBER role if initial create fails
+    if (error && normalizeRole(data.role) === 'TEAM_MEMBER') {
+        console.log('[TEAM_MEMBER_CREATE_FALLBACK] Initial create failed, retrying with TEAM_MEMBER', { error: error?.message });
+        viewerRoleSupported = false;
+        const retry = await supabase
+            .from('profiles')
+            .insert([{ name: data.name, email: data.email, role: 'TEAM_MEMBER', status: data.status }])
+            .select()
+            .single();
+        if (retry.data) {
+            console.log('[TEAM_MEMBER_CREATE_FALLBACK] Retry succeeded');
+            await writeAudit('CREATE_USER', 'user', retry.data.id);
+            return mapProfileRow(retry.data);
+        } else if (retry.error) {
+            throw retry.error;
+        }
+    }
     if (error)
         throw error;
     await writeAudit('CREATE_USER', 'user', newProfile.id);
-    return { id: newProfile.id, name: newProfile.name, email: newProfile.email, role: newProfile.role, status: newProfile.status, createdAt: newProfile.created_at };
+    return mapProfileRow(newProfile);
 }
 export async function updateUser(id, data) {
     const actor = await requireUser();
     const { data: target, error: fetchError } = await supabase.from('profiles').select('*').eq('id', id).single();
     if (fetchError || !target)
         throw new Error('User not found');
-    if (actor.role === 'VIEWER' && actor.id === id) {
-        throw new AuthorizationError('VIEWER role is read-only');
+    if (actor.role === 'TEAM_MEMBER' && actor.id === id) {
+        throw new AuthorizationError('TEAM_MEMBER role is read-only');
     }
     const isRoleChange = typeof data.role !== 'undefined' || typeof data.status !== 'undefined';
     if (isRoleChange && !hasPermission(actor.role, 'users:assign-role')) {
@@ -424,19 +566,67 @@ export async function updateUser(id, data) {
     if (!hasPermission(actor.role, 'users:manage') && actor.id !== id) {
         throw new AuthorizationError('Forbidden');
     }
-    const updateData = { ...(data.name && { name: data.name }), ...(data.role && { role: data.role }), ...(data.status && { status: data.status }) };
-    const { data: updated, error } = await supabase.from('profiles').update(updateData).eq('id', id).select().single();
+    const updateData = { ...(data.name && { name: data.name }), ...(data.role && { role: mapRoleToDb(data.role) }), ...(data.status && { status: data.status }) };
+    let { data: updated, error } = await supabase.from('profiles').update(updateData).eq('id', id).select().single();
+    
+    // Retry fallback for TEAM_MEMBER role updates if initial attempt fails
+    if (error && typeof data.role !== 'undefined' && normalizeRole(data.role) === 'TEAM_MEMBER') {
+        console.log('[TEAM_MEMBER_UPDATE_FALLBACK] Initial update failed, retrying with TEAM_MEMBER', { error: error?.message });
+        viewerRoleSupported = false;
+        const retry = await supabase
+            .from('profiles')
+            .update({ ...updateData, role: 'TEAM_MEMBER' })
+            .eq('id', id)
+            .select()
+            .single();
+        if (retry.data) {
+            console.log('[TEAM_MEMBER_UPDATE_FALLBACK] Retry succeeded');
+            updated = retry.data;
+            error = null; // Clear error on successful retry
+        } else {
+            error = retry.error; // Keep original error if fallback also fails
+        }
+    }
     if (error)
         throw error;
     await writeAudit('UPDATE_USER', 'user', id);
-    return { id: updated.id, name: updated.name, email: updated.email, role: updated.role, status: updated.status, createdAt: updated.created_at };
+    return mapProfileRow(updated);
 }
 export async function deleteUser(id) {
-    await requirePermission('users:manage');
+    const actor = await requirePermission('users:manage');
+    if (actor.id === id) {
+        throw new AuthorizationError('You cannot delete your own account');
+    }
+    const { data: target, error: targetError } = await supabase
+        .from('profiles')
+        .select('id,name,status')
+        .eq('id', id)
+        .maybeSingle();
+    if (targetError)
+        throw targetError;
+    if (!target)
+        throw new Error('User not found');
+
     const { error } = await supabase.from('profiles').delete().eq('id', id);
-    if (error)
-        throw error;
+    if (error) {
+        const code = String(error.code || '').toLowerCase();
+        const isFkRestrict = code === '23503' || String(error.message || '').toLowerCase().includes('foreign key');
+        if (!isFkRestrict) {
+            throw error;
+        }
+
+        // When relational records exist, keep referential integrity and deactivate instead.
+        const { error: deactivateError } = await supabase
+            .from('profiles')
+            .update({ status: 'inactive' })
+            .eq('id', id);
+        if (deactivateError)
+            throw deactivateError;
+        await writeAudit('DEACTIVATE_USER', 'user', id);
+        return { softDeleted: true };
+    }
     await writeAudit('DELETE_USER', 'user', id);
+    return { softDeleted: false };
 }
 // ── Projects ──────────────────────────────────────────
 export async function getProjects() {
@@ -445,19 +635,33 @@ export async function getProjects() {
     const { data, error } = await withRetry(() => supabase.from('projects').select('*'));
     if (error)
         throw error;
-    return data.map(p => ({ id: p.id, title: p.title, description: p.description, createdBy: p.created_by, createdAt: p.created_at, deadline: p.deadline, priority: p.priority, assignedUsers: [] }));
+    const projectIds = (data || []).map((p) => p.id);
+    const { data: memberRows, error: memberError } = projectIds.length
+        ? await withRetry(() => supabase.from('project_members').select('project_id,user_id').in('project_id', projectIds))
+        : { data: [], error: null };
+    if (memberError)
+        throw memberError;
+    return (data || []).map(p => ({ id: p.id, title: p.title, description: p.description, createdBy: p.created_by, createdAt: p.created_at, deadline: p.deadline, priority: p.priority, assignedUsers: (memberRows || []).filter((m) => m.project_id === p.id).map((m) => m.user_id) }));
 }
 export async function getProjectById(id) {
     await requireUser();
-    const { data, error } = await supabase.from('projects').select('*').eq('id', id).single();
+    const { data, error } = await supabase.from('projects').select('*').eq('id', id).maybeSingle();
     if (error)
         return undefined;
-    return data ? { id: data.id, title: data.title, description: data.description, createdBy: data.created_by, createdAt: data.created_at, deadline: data.deadline, priority: data.priority, assignedUsers: [] } : undefined;
+    if (!data)
+        return undefined;
+    const { data: members, error: memberError } = await supabase
+        .from('project_members')
+        .select('user_id')
+        .eq('project_id', id);
+    if (memberError)
+        throw memberError;
+    return { id: data.id, title: data.title, description: data.description, createdBy: data.created_by, createdAt: data.created_at, deadline: data.deadline, priority: data.priority, assignedUsers: (members || []).map((m) => m.user_id) };
 }
 export async function getProjectsForUser(userId) {
     const actor = await requireUser();
     ensureSupabase();
-    if (actor.role === 'TEAM_MEMBER') {
+    if (actor.role === 'TEAM_LEADER') {
         const { data, error } = await supabase
             .from('project_members')
             .select('project_id')
@@ -473,7 +677,13 @@ export async function getProjectsForUser(userId) {
             .in('id', projectIds);
         if (projError)
             throw projError;
-        return projects.map(p => ({ id: p.id, title: p.title, description: p.description, createdBy: p.created_by, createdAt: p.created_at, deadline: p.deadline, priority: p.priority, assignedUsers: [] }));
+        const { data: memberRows, error: memberError } = await supabase
+            .from('project_members')
+            .select('project_id,user_id')
+            .in('project_id', projectIds);
+        if (memberError)
+            throw memberError;
+        return projects.map(p => ({ id: p.id, title: p.title, description: p.description, createdBy: p.created_by, createdAt: p.created_at, deadline: p.deadline, priority: p.priority, assignedUsers: (memberRows || []).filter((m) => m.project_id === p.id).map((m) => m.user_id) }));
     }
     return getProjects();
 }
@@ -487,16 +697,26 @@ export async function createProject(data) {
         .single();
     if (error)
         throw error;
+    if (Array.isArray(data.assignedUsers) && data.assignedUsers.length > 0) {
+        const { error: memberError } = await supabase.from('project_members').insert(
+            data.assignedUsers.map((userId) => ({ project_id: newProject.id, user_id: userId }))
+        );
+        if (memberError) {
+            throw memberError;
+        }
+    }
     await writeAudit('CREATE_PROJECT', 'project', newProject.id);
-    return { id: newProject.id, title: newProject.title, description: newProject.description, createdBy: newProject.created_by, createdAt: newProject.created_at, deadline: newProject.deadline, priority: newProject.priority, assignedUsers: [] };
+    return { id: newProject.id, title: newProject.title, description: newProject.description, createdBy: newProject.created_by, createdAt: newProject.created_at, deadline: newProject.deadline, priority: newProject.priority, assignedUsers: Array.isArray(data.assignedUsers) ? data.assignedUsers : [] };
 }
 export async function updateProject(id, data) {
     await requirePermission('projects:update');
     ensureSupabase();
     const updateData = { ...(data.title && { title: data.title }), ...(data.description && { description: data.description }), ...(data.deadline && { deadline: data.deadline }), ...(data.priority && { priority: data.priority }) };
-    const { data: updated, error } = await supabase.from('projects').update(updateData).eq('id', id).select().single();
+    const { data: updated, error } = await supabase.from('projects').update(updateData).eq('id', id).select().maybeSingle();
     if (error)
         throw error;
+    if (!updated)
+        throw new AuthorizationError('Project not found or not accessible');
     await writeAudit('UPDATE_PROJECT', 'project', id);
     return { id: updated.id, title: updated.title, description: updated.description, createdBy: updated.created_by, createdAt: updated.created_at, deadline: updated.deadline, priority: updated.priority, assignedUsers: [] };
 }
@@ -524,30 +744,36 @@ export async function getProjectMembers(projectId) {
     }
 }
 export async function assignProjectManager(projectId, userId) {
-    const actor = await requirePermission('projects:update');
+    await requirePermission('projects:update');
     ensureSupabase();
     try {
-        const { data: project } = await supabase.from('projects').select('*').eq('id', projectId).single();
+        const { data: project, error: projectError } = await supabase.from('projects').select('*').eq('id', projectId).maybeSingle();
+        if (projectError)
+            throw projectError;
         if (!project)
             throw new Error('Project not found');
-        const { data: user } = await supabase.from('profiles').select('*').eq('id', userId).single();
+        const { data: user, error: userError } = await supabase.from('profiles').select('*').eq('id', userId).maybeSingle();
+        if (userError)
+            throw userError;
         if (!user)
             throw new Error('User not found');
-        // Try to delete existing manager, but don't fail if none exists or table missing
-        try {
-            await supabase.from('project_members').delete().eq('project_id', projectId).eq('role', 'manager');
-        } catch (deleteError) {
-            console.log('Delete previous manager skipped:', deleteError?.message);
+
+        // Persist manager assignment in projects table for schemas without project_members.role.
+        const { error: updateProjectError } = await supabase
+            .from('projects')
+            .update({ created_by: userId })
+            .eq('id', projectId);
+        if (updateProjectError)
+            throw updateProjectError;
+
+        // Ensure manager is also a project member (idempotent via PK conflict ignore).
+        const { error: memberInsertError } = await supabase
+            .from('project_members')
+            .upsert([{ project_id: projectId, user_id: userId }], { onConflict: 'project_id,user_id', ignoreDuplicates: true });
+        if (memberInsertError) {
+            console.warn('Could not ensure manager membership row:', memberInsertError.message);
         }
-        const { error: insertError } = await supabase.from('project_members').insert([{
-            project_id: projectId,
-            user_id: userId,
-            role: 'manager',
-            assigned_at: new Date().toISOString()
-        }]);
-        if (insertError) {
-            console.warn('Could not save project manager to DB (table may not exist):', insertError.message);
-        }
+
         await createNotification(userId, 'Project Manager Role', `You have been assigned as manager for "${project.title}"`, 'role_assigned');
         await writeAudit('ASSIGN_PROJECT_MANAGER', 'project', projectId);
     } catch (err) {
@@ -556,60 +782,45 @@ export async function assignProjectManager(projectId, userId) {
     }
 }
 export async function assignProjectMembers(projectId, userIds) {
-    const actor = await requirePermission('projects:update');
+    await requirePermission('projects:update');
     ensureSupabase();
     try {
-        const { data: project } = await supabase.from('projects').select('*').eq('id', projectId).single();
+        const { data: project } = await supabase.from('projects').select('*').eq('id', projectId).maybeSingle();
         if (!project)
             throw new Error('Project not found');
-        
-        // Try to get existing members - handle table not existing
-        let existingIds = [];
-        try {
-            const { data: existingMembers } = await supabase
-                .from('project_members')
-                .select('user_id')
-                .eq('project_id', projectId)
-                .eq('role', 'member');
-            existingIds = existingMembers?.map(m => m.user_id) || [];
-        } catch (err) {
-            console.log('Could not query project_members (table may not exist)');
-            existingIds = [];
-        }
+        const { data: existingMembers, error: existingMembersError } = await supabase
+            .from('project_members')
+            .select('user_id')
+            .eq('project_id', projectId);
+        if (existingMembersError)
+            throw existingMembersError;
+        const existingIds = existingMembers?.map(m => m.user_id) || [];
         
         const toAdd = userIds.filter(id => !existingIds.includes(id));
         const toRemove = existingIds.filter(id => !userIds.includes(id));
         
         // Remove old members
         if (toRemove.length > 0) {
-            try {
-                await supabase
-                    .from('project_members')
-                    .delete()
-                    .eq('project_id', projectId)
-                    .eq('role', 'member')
-                    .in('user_id', toRemove);
-            } catch (err) {
-                console.log('Delete members error:', err?.message);
-            }
+            const { error: removeError } = await supabase
+                .from('project_members')
+                .delete()
+                .eq('project_id', projectId)
+                .in('user_id', toRemove);
+            if (removeError)
+                throw removeError;
         }
         
         // Add new members
         if (toAdd.length > 0) {
-            try {
-                await supabase.from('project_members').insert(
-                    toAdd.map(userId => ({
-                        project_id: projectId,
-                        user_id: userId,
-                        role: 'member',
-                        assigned_at: new Date().toISOString()
-                    }))
-                );
-            } catch (err) {
-                console.warn('Could not save project members (table may not exist):', err?.message);
-            }
+            const { error: addError } = await supabase.from('project_members').insert(
+                toAdd.map(userId => ({
+                    project_id: projectId,
+                    user_id: userId,
+                }))
+            );
+            if (addError)
+                throw addError;
             
-            // Send notifications even if DB insert fails
             await Promise.all(toAdd.map(userId => 
                 createNotification(userId, 'Project Assignment', `You have been assigned to project "${project.title}"`, 'project_assigned')
             ));
@@ -618,6 +829,7 @@ export async function assignProjectMembers(projectId, userIds) {
         await writeAudit('ASSIGN_PROJECT_MEMBERS', 'project', projectId);
     } catch (err) {
         console.error('Error assigning project members:', err?.message);
+        throw err;
     }
 }
 // ── Teams ────────────────────────────────────────────
@@ -627,7 +839,26 @@ export async function getTeams() {
     const { data, error } = await withRetry(() => supabase.from('teams').select('*'));
     if (error)
         throw error;
-    return data.map(t => ({ id: t.id, name: t.name, description: t.description, createdBy: t.created_by, members: [], projects: [], createdAt: t.created_at }));
+    const teamIds = (data || []).map((team) => team.id);
+    const { data: memberRows, error: memberError } = teamIds.length
+        ? await withRetry(() => supabase.from('team_members').select('team_id,user_id').in('team_id', teamIds))
+        : { data: [], error: null };
+    if (memberError)
+        throw memberError;
+    const { data: projectRows, error: projectError } = teamIds.length
+        ? await withRetry(() => supabase.from('team_projects').select('team_id,project_id').in('team_id', teamIds))
+        : { data: [], error: null };
+    if (projectError)
+        throw projectError;
+    return (data || []).map((team) => ({
+        id: team.id,
+        name: team.name,
+        description: team.description,
+        createdBy: team.created_by,
+        members: (memberRows || []).filter((member) => member.team_id === team.id).map((member) => member.user_id),
+        projects: (projectRows || []).filter((project) => project.team_id === team.id).map((project) => project.project_id),
+        createdAt: team.created_at,
+    }));
 }
 export async function getTeamById(id) {
     await requireUser();
@@ -650,8 +881,24 @@ export async function createTeam(data) {
         .single();
     if (error)
         throw error;
+    const memberIds = Array.from(new Set((data.members || []).filter(Boolean)));
+    if (memberIds.length > 0) {
+        const { error: memberError } = await supabase
+            .from('team_members')
+            .insert(memberIds.map((userId) => ({ team_id: newTeam.id, user_id: userId })));
+        if (memberError)
+            throw memberError;
+    }
+    const projectIds = Array.from(new Set((data.projects || []).filter(Boolean)));
+    if (projectIds.length > 0) {
+        const { error: projectError } = await supabase
+            .from('team_projects')
+            .insert(projectIds.map((projectId) => ({ team_id: newTeam.id, project_id: projectId })));
+        if (projectError)
+            throw projectError;
+    }
     await writeAudit('CREATE_TEAM', 'team', newTeam.id);
-    return { id: newTeam.id, name: newTeam.name, description: newTeam.description, createdBy: newTeam.created_by, members: data.members, projects: data.projects, createdAt: newTeam.created_at };
+    return { id: newTeam.id, name: newTeam.name, description: newTeam.description, createdBy: newTeam.created_by, members: memberIds, projects: projectIds, createdAt: newTeam.created_at };
 }
 export async function updateTeam(id, data) {
     await requirePermission('teams:manage');
@@ -660,6 +907,61 @@ export async function updateTeam(id, data) {
     const { data: updated, error } = await supabase.from('teams').update(updateData).eq('id', id).select().single();
     if (error)
         throw error;
+
+    const nextMembers = Array.from(new Set((data.members || []).filter(Boolean)));
+    const { data: existingMemberRows, error: existingMemberError } = await supabase
+        .from('team_members')
+        .select('user_id')
+        .eq('team_id', id);
+    if (existingMemberError)
+        throw existingMemberError;
+    const currentMembers = (existingMemberRows || []).map((row) => row.user_id);
+    const membersToAdd = nextMembers.filter((memberId) => !currentMembers.includes(memberId));
+    const membersToRemove = currentMembers.filter((memberId) => !nextMembers.includes(memberId));
+    if (membersToRemove.length > 0) {
+        const { error: removeMembersError } = await supabase
+            .from('team_members')
+            .delete()
+            .eq('team_id', id)
+            .in('user_id', membersToRemove);
+        if (removeMembersError)
+            throw removeMembersError;
+    }
+    if (membersToAdd.length > 0) {
+        const { error: addMembersError } = await supabase
+            .from('team_members')
+            .insert(membersToAdd.map((memberId) => ({ team_id: id, user_id: memberId })));
+        if (addMembersError)
+            throw addMembersError;
+    }
+
+    const nextProjects = Array.from(new Set((data.projects || []).filter(Boolean)));
+    const { data: existingProjectRows, error: existingProjectError } = await supabase
+        .from('team_projects')
+        .select('project_id')
+        .eq('team_id', id);
+    if (existingProjectError)
+        throw existingProjectError;
+    const currentProjects = (existingProjectRows || []).map((row) => row.project_id);
+    const projectsToAdd = nextProjects.filter((projectId) => !currentProjects.includes(projectId));
+    const projectsToRemove = currentProjects.filter((projectId) => !nextProjects.includes(projectId));
+    if (projectsToRemove.length > 0) {
+        const { error: removeProjectsError } = await supabase
+            .from('team_projects')
+            .delete()
+            .eq('team_id', id)
+            .in('project_id', projectsToRemove);
+        if (removeProjectsError)
+            throw removeProjectsError;
+    }
+    if (projectsToAdd.length > 0) {
+        const { error: addProjectsError } = await supabase
+            .from('team_projects')
+            .insert(projectsToAdd.map((projectId) => ({ team_id: id, project_id: projectId })));
+        if (addProjectsError)
+            throw addProjectsError;
+    }
+
     await writeAudit('UPDATE_TEAM', 'team', id);
     const { data: members } = await supabase.from('team_members').select('user_id').eq('team_id', id);
     const { data: projects } = await supabase.from('team_projects').select('project_id').eq('team_id', id);
@@ -678,7 +980,7 @@ export async function getTasks() {
     const actor = await requirePermission('tasks:view');
     ensureSupabase();
     let query = supabase.from('tasks').select('*');
-    if (actor.role === 'TEAM_MEMBER') {
+    if (actor.role === 'TEAM_LEADER') {
         query = query.eq('assigned_to', actor.id);
     }
     const { data, error } = await withRetry(() => query);
@@ -693,17 +995,17 @@ export async function getTaskById(id) {
         return undefined;
     if (!data)
         return undefined;
-    if (actor.role === 'TEAM_MEMBER' && data.assigned_to !== actor.id)
+    if (actor.role === 'TEAM_LEADER' && data.assigned_to !== actor.id)
         throw new AuthorizationError('Forbidden');
     const { data: comments } = await supabase.from('comments').select('*').eq('task_id', id);
     return { id: data.id, title: data.title, description: data.description, projectId: data.project_id, assignedTo: data.assigned_to, createdBy: data.created_by, status: data.status, priority: data.priority, dueDate: data.due_date, comments: comments?.map(c => ({ id: c.id, taskId: c.task_id, userId: c.user_id, content: c.content, createdAt: c.created_at })) || [], createdAt: data.created_at };
 }
 export async function getTasksForUser(userId) {
     const actor = await requirePermission('tasks:view');
-    if (actor.role === 'TEAM_MEMBER' && actor.id !== userId)
+    if (actor.role === 'TEAM_LEADER' && actor.id !== userId)
         throw new AuthorizationError('Forbidden');
     ensureSupabase();
-    const { data, error } = await supabase.from('tasks').select('*').eq('assigned_to', actor.role === 'TEAM_MEMBER' ? actor.id : userId);
+    const { data, error } = await supabase.from('tasks').select('*').eq('assigned_to', actor.role === 'TEAM_LEADER' ? actor.id : userId);
     if (error || !data)
         throw error || new Error('Failed to fetch tasks');
     return data.map(t => ({ id: t.id, title: t.title, description: t.description, projectId: t.project_id, assignedTo: t.assigned_to, createdBy: t.created_by, status: t.status, priority: t.priority, dueDate: t.due_date, comments: [], createdAt: t.created_at }));
@@ -711,7 +1013,7 @@ export async function getTasksForUser(userId) {
 export async function getTasksForProject(projectId) {
     const actor = await requirePermission('tasks:view');
     let query = supabase.from('tasks').select('*').eq('project_id', projectId);
-    if (actor.role === 'TEAM_MEMBER') {
+    if (actor.role === 'TEAM_LEADER') {
         query = query.eq('assigned_to', actor.id);
     }
     const { data, error } = await query;
@@ -744,13 +1046,13 @@ export async function updateTask(id, data) {
     if (fetchError || !fetchedCurrent)
         throw new Error('Task not found');
     const current = { id: fetchedCurrent.id, title: fetchedCurrent.title, description: fetchedCurrent.description, projectId: fetchedCurrent.project_id, assignedTo: fetchedCurrent.assigned_to, createdBy: fetchedCurrent.created_by, status: fetchedCurrent.status, priority: fetchedCurrent.priority, dueDate: fetchedCurrent.due_date, comments: [], createdAt: fetchedCurrent.created_at };
-    if (actor.role === 'TEAM_MEMBER') {
+    if (actor.role === 'TEAM_LEADER') {
         if (current.assignedTo !== actor.id)
             throw new AuthorizationError('Forbidden');
         const attemptedFields = Object.keys(data);
         const statusOnly = attemptedFields.every((field) => field === 'status');
         if (!statusOnly || typeof data.status === 'undefined') {
-            throw new AuthorizationError('TEAM_MEMBER can only update task status');
+            throw new AuthorizationError('TEAM_LEADER can only update task status');
         }
         assertTaskTransition(current.status, data.status);
     }
@@ -775,7 +1077,7 @@ export async function updateTaskStatus(id, status) {
     const { data: task, error } = await supabase.from('tasks').select('*').eq('id', id).single();
     if (error || !task)
         throw new Error('Task not found');
-    if (actor.role === 'TEAM_MEMBER') {
+    if (actor.role === 'TEAM_LEADER') {
         if (task.assigned_to !== actor.id)
             throw new AuthorizationError('Forbidden');
         await requirePermission('tasks:update-own-status');
@@ -803,7 +1105,7 @@ export async function addComment(taskId, userId, content) {
         throw new Error('Task not found');
     if (actor.id !== userId)
         throw new AuthorizationError('Forbidden');
-    if (actor.role === 'TEAM_MEMBER' && task.assigned_to !== actor.id)
+    if (actor.role === 'TEAM_LEADER' && task.assigned_to !== actor.id)
         throw new AuthorizationError('Forbidden');
     const { data: comment, error } = await supabase
         .from('comments')
@@ -830,8 +1132,8 @@ export async function getNotificationsForUser(userId) {
 }
 export async function markNotificationRead(id) {
     const actor = await requireUser();
-    if (actor.role === 'VIEWER')
-        throw new AuthorizationError('VIEWER role is read-only');
+    if (actor.role === 'TEAM_MEMBER')
+        throw new AuthorizationError('TEAM_MEMBER role is read-only');
     ensureSupabase();
     const { data: notification, error: fetchError } = await supabase.from('notifications').select('*').eq('id', id).single();
     if (fetchError || !notification)
@@ -844,8 +1146,8 @@ export async function markNotificationRead(id) {
 }
 export async function markAllNotificationsRead(userId) {
     const actor = await requireUser();
-    if (actor.role === 'VIEWER')
-        throw new AuthorizationError('VIEWER role is read-only');
+    if (actor.role === 'TEAM_MEMBER')
+        throw new AuthorizationError('TEAM_MEMBER role is read-only');
     if (actor.id !== userId && actor.role !== 'ADMIN')
         throw new AuthorizationError('Forbidden');
     ensureSupabase();
@@ -857,6 +1159,35 @@ export async function markAllNotificationsRead(userId) {
 export async function getConversations() {
     const actor = await requirePermission('chat:view');
     ensureSupabase();
+    if (actor.role === 'ADMIN') {
+        const { data: conversationRows, error: conversationError } = await withRetry(() => supabase
+            .from('conversations')
+            .select('*')
+            .order('last_message_at', { ascending: false }));
+        if (conversationError)
+            throw conversationError;
+        const conversationIds = (conversationRows || []).map((row) => row.id);
+        const { data: participantRows } = conversationIds.length
+            ? await withRetry(() => supabase
+                .from('conversation_members')
+                .select('conversation_id,user_id')
+                .in('conversation_id', conversationIds))
+            : { data: [] };
+        const mapped = (conversationRows || []).map((row) => ({
+            id: row.id,
+            type: row.type,
+            title: row.title || undefined,
+            projectId: row.project_id || undefined,
+            teamId: row.team_id || undefined,
+            createdBy: row.created_by,
+            participants: (participantRows || [])
+                .filter((participant) => participant.conversation_id === row.id)
+                .map((participant) => participant.user_id),
+            lastMessageAt: row.last_message_at,
+            createdAt: row.created_at,
+        }));
+        return dedupeConversationsByScope(mapped, actor.id);
+    }
     const { data: membershipRows, error: membershipError } = await withRetry(() => supabase
         .from('conversation_members')
         .select('conversation_id')
@@ -877,7 +1208,7 @@ export async function getConversations() {
         .from('conversation_members')
         .select('conversation_id,user_id')
         .in('conversation_id', conversationIds));
-    return (conversationRows || []).map((row) => ({
+    const mapped = (conversationRows || []).map((row) => ({
         id: row.id,
         type: row.type,
         title: row.title || undefined,
@@ -890,6 +1221,7 @@ export async function getConversations() {
         lastMessageAt: row.last_message_at,
         createdAt: row.created_at,
     }));
+    return dedupeConversationsByScope(mapped, actor.id);
 }
 export async function createDirectConversation(otherUserId) {
     const actor = await requirePermission('chat:send');
@@ -981,9 +1313,7 @@ export async function createDirectConversation(otherUserId) {
 }
 export async function createProjectConversation(projectId, title) {
     const actor = await requirePermission('chat:create-group');
-    const project = projects.find((item) => item.id === projectId);
-    if (!project)
-        throw new Error('Project not found');
+    const safeTitle = String(title || '').trim() || 'Project Group';
     if (supabase) {
         try {
             const { data: insertedConversation, error: insertConversationError } = await supabase
@@ -991,7 +1321,7 @@ export async function createProjectConversation(projectId, title) {
                 .insert([
                 {
                     type: 'project',
-                    title: title.trim() || `${project.title} chat`,
+                    title: safeTitle,
                     project_id: projectId,
                     created_by: actor.id,
                     last_message_at: new Date().toISOString(),
@@ -1027,10 +1357,11 @@ export async function createProjectConversation(projectId, title) {
                 createdAt: insertedConversation.created_at,
             };
         }
-        catch {
-            // Fall through to local mode
+        catch (error) {
+            throw error;
         }
     }
+    throw new Error('Project chat backend is unavailable');
 }
 export async function getConversationMessages(conversationId) {
     const actor = await requirePermission('chat:view');
@@ -1047,40 +1378,15 @@ export async function getConversationMessages(conversationId) {
                 .eq('conversation_id', conversationId)
                 .eq('user_id', actor.id)
                 .maybeSingle();
-            if (!membership)
+            if (!membership && actor.role !== 'ADMIN')
                 throw new AuthorizationError('Forbidden');
-            const { data: membershipRows } = await supabase
-                .from('conversation_members')
-                .select('user_id')
-                .eq('conversation_id', conversationId);
-            const participants = (membershipRows || []).map((row) => row.user_id);
-            const otherParticipantId = participants.find((participantId) => participantId !== actor.id);
-
-            let messageQuery = supabase
+            const messageQuery = supabase
                 .from('messages')
                 .select('*')
                 .eq('conversation_id', conversationId)
                 .order('created_at', { ascending: true });
 
-            if (conversationRow?.type === 'direct' && otherParticipantId) {
-                messageQuery = supabase
-                    .from('messages')
-                    .select('*')
-                    .eq('conversation_id', conversationId)
-                    .or(buildDirectMessageFilter(actor.id, otherParticipantId))
-                    .order('created_at', { ascending: true });
-            }
-
-            let { data: messageRows, error: messageError } = await withRetry(() => messageQuery);
-            if (messageError && conversationRow?.type === 'direct' && otherParticipantId) {
-                const retry = await supabase
-                    .from('messages')
-                    .select('*')
-                    .eq('conversation_id', conversationId)
-                    .order('created_at', { ascending: true });
-                messageRows = retry.data;
-                messageError = retry.error;
-            }
+            const { data: messageRows, error: messageError } = await withRetry(() => messageQuery);
             if (messageError)
                 throw messageError;
             const messageIds = (messageRows || []).map((row) => row.id);
@@ -1132,7 +1438,7 @@ export async function sendMessage(input) {
             const content = input.content.trim();
             if (!content && !input.fileUrl)
                 throw new Error('Message cannot be empty');
-            const mentions = extractMentionUserIds(content).filter((id) => id !== actor.id);
+            const mentions = (await extractMentionUserIds(content)).filter((id) => id !== actor.id);
             const { data: insertedMessage, error: insertMessageError } = await withRetry(() => supabase
                 .from('messages')
                 .insert([
@@ -1190,7 +1496,7 @@ export async function sendMessage(input) {
     const content = input.content.trim();
     if (!content && !input.fileUrl)
         throw new Error('Message cannot be empty');
-    const mentions = extractMentionUserIds(content).filter((id) => id !== actor.id);
+    const mentions = (await extractMentionUserIds(content)).filter((id) => id !== actor.id);
     const message = {
         id: `msg${Date.now()}${Math.random().toString(16).slice(2, 5)}`,
         conversationId: conversation.id,
@@ -1265,40 +1571,65 @@ export async function getTypingUsers(conversationId) {
         .map((typingState) => typingState.userId);
 }
 export async function getActiveCalls() {
+    if (!CALLS_ENABLED)
+        return [];
     const actor = await requireUser();
+    if (callsFeatureUnavailable)
+        return [];
     if (supabase) {
         try {
-            const { data: membershipRows } = await withRetry(() => supabase
+            if (actor.role === 'ADMIN') {
+                const { data: callRows, error: callError } = await withRetry(() => supabase
+                    .from('calls')
+                    .select('*')
+                    .order('started_at', { ascending: false }));
+                if (callError)
+                    throw callError;
+                const callIds = (callRows || []).map((row) => row.id);
+                const { data: participantRows, error: participantError } = callIds.length
+                    ? await withRetry(() => supabase
+                        .from('call_participants')
+                        .select('call_id,user_id')
+                        .in('call_id', callIds))
+                    : { data: [] };
+                if (participantError)
+                    throw participantError;
+                return (callRows || [])
+                    .filter((row) => ['ringing', 'ongoing'].includes(String(row.status || row.call_status || 'ringing')))
+                    .map((row) => mapCallRow(row, participantRows || []));
+            }
+            const { data: membershipRows, error: membershipError } = await withRetry(() => supabase
                 .from('conversation_members')
                 .select('conversation_id')
                 .eq('user_id', actor.id));
+            if (membershipError)
+                throw membershipError;
             const conversationIds = (membershipRows || []).map((row) => row.conversation_id);
             if (conversationIds.length === 0)
                 return [];
-            const { data: callRows } = await withRetry(() => supabase
+            const { data: callRows, error: callError } = await withRetry(() => supabase
                 .from('calls')
                 .select('*')
                 .in('conversation_id', conversationIds)
-                .in('status', ['ringing', 'ongoing'])
                 .order('started_at', { ascending: false }));
-            const { data: participantRows } = await withRetry(() => supabase
-                .from('conversation_members')
-                .select('conversation_id,user_id')
-                .in('conversation_id', conversationIds));
-            return (callRows || []).map((row) => ({
-                id: row.id,
-                conversationId: row.conversation_id,
-                initiatedBy: row.initiated_by,
-                participants: (participantRows || [])
-                    .filter((participant) => participant.conversation_id === row.conversation_id)
-                    .map((participant) => participant.user_id),
-                type: row.call_type,
-                status: row.status,
-                startedAt: row.started_at,
-                endedAt: row.ended_at || undefined,
-            }));
+            if (callError)
+                throw callError;
+            const callIds = (callRows || []).map((row) => row.id);
+            const { data: participantRows, error: participantError } = callIds.length
+                ? await withRetry(() => supabase
+                    .from('call_participants')
+                    .select('call_id,user_id')
+                    .in('call_id', callIds))
+                : { data: [] };
+            if (participantError)
+                throw participantError;
+            return (callRows || [])
+                .filter((row) => ['ringing', 'ongoing'].includes(String(row.status || row.call_status || 'ringing')))
+                .map((row) => mapCallRow(row, participantRows || []));
         }
-        catch {
+        catch (error) {
+            if (markCallsFeatureUnavailable(error))
+                return [];
             // Fall through to local mode
         }
     }
@@ -1307,22 +1638,30 @@ export async function getActiveCalls() {
         (hasPermission(actor.role, 'calls:join') || actor.role === 'ADMIN'));
 }
 export async function startCall(conversationId, type) {
+    if (!CALLS_ENABLED)
+        throw new Error('Calls feature is disabled for this environment.');
     const actor = await requireUser();
+    if (callsFeatureUnavailable)
+        throw new Error('Calls feature is not enabled in the database yet.');
     if (!hasPermission(actor.role, 'calls:initiate')) {
         throw new AuthorizationError('Only PROJECT_MANAGER and ADMIN can initiate calls');
     }
     ensureSupabase();
-    const { data: conversationRow } = await withRetry(() => supabase
+    const { data: conversationRow, error: conversationError } = await withRetry(() => supabase
         .from('conversations')
         .select('*')
         .eq('id', conversationId)
         .single());
+    if (conversationError)
+        throw conversationError;
     if (!conversationRow)
         throw new Error('Conversation not found');
-    const { data: membershipRows } = await withRetry(() => supabase
+    const { data: membershipRows, error: membershipError } = await withRetry(() => supabase
         .from('conversation_members')
         .select('user_id')
         .eq('conversation_id', conversationId));
+    if (membershipError)
+        throw membershipError;
     const participants = (membershipRows || []).map((row) => row.user_id);
     const conversation = {
         id: conversationRow.id,
@@ -1349,18 +1688,69 @@ export async function startCall(conversationId, type) {
     ])
         .select()
         .single());
-    if (insertCallError)
+    if (insertCallError) {
+        if (isMissingColumnError(insertCallError, 'initiated_by')) {
+            const fallbackInsert = await withRetry(() => supabase
+                .from('calls')
+                .insert([
+                {
+                    conversation_id: conversationId,
+                    initiator_id: actor.id,
+                    call_type: type,
+                    status: 'ringing',
+                },
+            ])
+                .select()
+                .single());
+            if (fallbackInsert.error)
+                throw fallbackInsert.error;
+            const fallbackCall = fallbackInsert.data;
+            const fallbackParticipants = await withRetry(() => supabase
+                .from('call_participants')
+                .upsert(participants.map((participantId) => ({ call_id: fallbackCall.id, user_id: participantId }))));
+            if (fallbackParticipants.error) {
+                if (markCallsFeatureUnavailable(fallbackParticipants.error)) {
+                    throw new Error('Calls feature is not enabled in the database yet.');
+                }
+                throw fallbackParticipants.error;
+            }
+            await Promise.all(participants
+                .filter((participantId) => participantId !== actor.id)
+                .map((participantId) => createNotification(participantId, 'Incoming call', `${actor.name} started a ${type} call`, 'call')));
+            const mappedFallback = {
+                id: fallbackCall.id,
+                conversationId: fallbackCall.conversation_id,
+                initiatedBy: fallbackCall.initiated_by || fallbackCall.initiator_id,
+                participants,
+                type: fallbackCall.call_type,
+                status: fallbackCall.status,
+                startedAt: fallbackCall.started_at,
+                endedAt: fallbackCall.ended_at || undefined,
+            };
+            emitCommunicationEvent({ type: 'call:update', call: mappedFallback });
+            return mappedFallback;
+        }
+        if (markCallsFeatureUnavailable(insertCallError)) {
+            throw new Error('Calls feature is not enabled in the database yet.');
+        }
         throw insertCallError;
-    await withRetry(() => supabase
+    }
+    const { error: participantsError } = await withRetry(() => supabase
         .from('call_participants')
         .upsert(participants.map((participantId) => ({ call_id: insertedCall.id, user_id: participantId }))));
+    if (participantsError) {
+        if (markCallsFeatureUnavailable(participantsError)) {
+            throw new Error('Calls feature is not enabled in the database yet.');
+        }
+        throw participantsError;
+    }
     await Promise.all(participants
         .filter((participantId) => participantId !== actor.id)
         .map((participantId) => createNotification(participantId, 'Incoming call', `${actor.name} started a ${type} call`, 'call')));
     const mapped = {
         id: insertedCall.id,
         conversationId: insertedCall.conversation_id,
-        initiatedBy: insertedCall.initiated_by,
+        initiatedBy: insertedCall.initiated_by || insertedCall.initiator_id,
         participants,
         type: insertedCall.call_type,
         status: insertedCall.status,
@@ -1371,7 +1761,11 @@ export async function startCall(conversationId, type) {
     return mapped;
 }
 export async function joinCall(callId) {
+    if (!CALLS_ENABLED)
+        throw new Error('Calls feature is disabled for this environment.');
     const actor = await requirePermission('calls:join');
+    if (callsFeatureUnavailable)
+        throw new Error('Calls feature is not enabled in the database yet.');
     if (supabase) {
         try {
             const { data: currentRow, error: currentError } = await withRetry(() => supabase
@@ -1381,10 +1775,12 @@ export async function joinCall(callId) {
                 .single());
             if (currentError || !currentRow)
                 throw new Error('Call not found');
-            const { data: participantRows } = await withRetry(() => supabase
+            const { data: participantRows, error: participantRowsError } = await withRetry(() => supabase
                 .from('conversation_members')
                 .select('user_id')
                 .eq('conversation_id', currentRow.conversation_id));
+            if (participantRowsError)
+                throw participantRowsError;
             const participants = (participantRows || []).map((row) => row.user_id);
             if (!participants.includes(actor.id))
                 throw new AuthorizationError('Forbidden');
@@ -1396,13 +1792,15 @@ export async function joinCall(callId) {
                 .single());
             if (updateError)
                 throw updateError;
-            await withRetry(() => supabase
+            const { error: upsertParticipantError } = await withRetry(() => supabase
                 .from('call_participants')
                 .upsert([{ call_id: callId, user_id: actor.id, joined_at: new Date().toISOString() }]));
+            if (upsertParticipantError)
+                throw upsertParticipantError;
             const mapped = {
                 id: updatedRow.id,
                 conversationId: updatedRow.conversation_id,
-                initiatedBy: updatedRow.initiated_by,
+                initiatedBy: updatedRow.initiated_by || updatedRow.initiator_id,
                 participants,
                 type: updatedRow.call_type,
                 status: updatedRow.status,
@@ -1412,15 +1810,24 @@ export async function joinCall(callId) {
             emitCommunicationEvent({ type: 'call:update', call: mapped });
             return mapped;
         }
-        catch {
+        catch (error) {
+            if (markCallsFeatureUnavailable(error)) {
+                throw new Error('Calls feature is not enabled in the database yet.');
+            }
             // Fall through to local mode
         }
     }
 }
 export async function endCall(callId) {
+    if (!CALLS_ENABLED)
+        return;
     const actor = await requireUser();
+    if (callsFeatureUnavailable)
+        return;
     ensureSupabase();
-    const { data: currentRow } = await withRetry(() => supabase.from('calls').select('*').eq('id', callId).single());
+    const { data: currentRow, error: currentError } = await withRetry(() => supabase.from('calls').select('*').eq('id', callId).single());
+    if (currentError && markCallsFeatureUnavailable(currentError))
+        return;
     if (!currentRow)
         return;
     const { data: participantRows } = await withRetry(() => supabase
@@ -1436,19 +1843,104 @@ export async function endCall(callId) {
         .eq('id', callId)
         .select()
         .single());
-    if (updateError)
+    if (updateError) {
+        if (markCallsFeatureUnavailable(updateError))
+            return;
         throw updateError;
+    }
     emitCommunicationEvent({
         type: 'call:update',
         call: {
             id: updatedRow.id,
             conversationId: updatedRow.conversation_id,
-            initiatedBy: updatedRow.initiated_by,
+            initiatedBy: updatedRow.initiated_by || updatedRow.initiator_id,
             participants,
             type: updatedRow.call_type,
             status: updatedRow.status,
             startedAt: updatedRow.started_at,
             endedAt: updatedRow.ended_at || undefined,
+        },
+    });
+}
+export async function getCallHistory() {
+    const actor = await requirePermission('calls:join');
+    ensureSupabase();
+    let callRows = [];
+    const { data, error } = await withRetry(() => supabase
+        .from('calls')
+        .select('*')
+        .order('started_at', { ascending: false })
+        .limit(200));
+    if (error)
+        throw error;
+    callRows = data || [];
+    const callIds = callRows.map((row) => row.id);
+    let participantRows = [];
+    if (callIds.length) {
+        const participantResult = await withRetry(() => supabase
+            .from('call_participants')
+            .select('call_id,user_id')
+            .in('call_id', callIds));
+        if (!participantResult.error) {
+            participantRows = participantResult.data || [];
+        }
+    }
+    return callRows.map((row) => mapCallRow(row, participantRows || []));
+}
+export async function deleteMessage(messageId) {
+    const actor = await requirePermission('chat:view');
+    ensureSupabase();
+    const { data: currentRow, error: currentError } = await withRetry(() => supabase
+        .from('messages')
+        .select('id,conversation_id,sender_id')
+        .eq('id', messageId)
+        .maybeSingle());
+    if (currentError)
+        throw currentError;
+    if (!currentRow)
+        return;
+    if (actor.role !== 'ADMIN' && currentRow.sender_id !== actor.id)
+        throw new AuthorizationError('Only sender or ADMIN can delete this message');
+    const { error } = await withRetry(() => supabase
+        .from('messages')
+        .delete()
+        .eq('id', messageId));
+    if (error)
+        throw error;
+    emitCommunicationEvent({ type: 'conversation:update', conversationId: currentRow.conversation_id });
+}
+export async function deleteCallHistory(callId) {
+    const actor = await requirePermission('calls:join');
+    ensureSupabase();
+    const { data: currentRow, error: currentError } = await withRetry(() => supabase
+        .from('calls')
+        .select('*')
+        .eq('id', callId)
+        .maybeSingle());
+    if (currentError)
+        throw currentError;
+    if (!currentRow)
+        return;
+    const isOwner = (currentRow.initiated_by || currentRow.initiator_id) === actor.id;
+    if (actor.role !== 'ADMIN' && !isOwner)
+        throw new AuthorizationError('Only call owner or ADMIN can delete this call history');
+    const { error } = await withRetry(() => supabase
+        .from('calls')
+        .delete()
+        .eq('id', callId));
+    if (error)
+        throw error;
+    emitCommunicationEvent({
+        type: 'call:update',
+        call: {
+            id: callId,
+            conversationId: currentRow.conversation_id,
+            initiatedBy: currentRow.initiated_by || currentRow.initiator_id,
+            participants: [],
+            type: currentRow.call_type,
+            status: 'ended',
+            startedAt: currentRow.started_at,
+            endedAt: currentRow.ended_at || new Date().toISOString(),
         },
     });
 }
@@ -1458,19 +1950,31 @@ export async function searchMessages(query) {
     if (!trimmed)
         return [];
     ensureSupabase();
-    const { data: membershipRows } = await supabase
-        .from('conversation_members')
-        .select('conversation_id')
-        .eq('user_id', actor.id);
-    const conversationIds = (membershipRows || []).map((row) => row.conversation_id);
-    if (conversationIds.length === 0)
-        return [];
-    const { data: messageRows } = await supabase
-        .from('messages')
-        .select('*')
-        .in('conversation_id', conversationIds)
-        .ilike('content', `%${trimmed}%`)
-        .order('created_at', { ascending: false });
+    let messageRows = [];
+    if (actor.role === 'ADMIN') {
+        const { data } = await supabase
+            .from('messages')
+            .select('*')
+            .ilike('content', `%${trimmed}%`)
+            .order('created_at', { ascending: false });
+        messageRows = data || [];
+    }
+    else {
+        const { data: membershipRows } = await supabase
+            .from('conversation_members')
+            .select('conversation_id')
+            .eq('user_id', actor.id);
+        const conversationIds = (membershipRows || []).map((row) => row.conversation_id);
+        if (conversationIds.length === 0)
+            return [];
+        const { data } = await supabase
+            .from('messages')
+            .select('*')
+            .in('conversation_id', conversationIds)
+            .ilike('content', `%${trimmed}%`)
+            .order('created_at', { ascending: false });
+        messageRows = data || [];
+    }
     return (messageRows || []).map((row) => ({
         id: row.id,
         conversationId: row.conversation_id,

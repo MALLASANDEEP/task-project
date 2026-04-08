@@ -10,7 +10,7 @@ import { roleLabel } from '@/lib/rbac';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts';
 export default function Dashboard() {
     const { role, user } = useAuth();
-    if (role === 'TEAM_MEMBER' && user) {
+  if (role === 'TEAM_LEADER' && user) {
         return <MemberDashboard userId={user.id}/>;
     }
     return <WorkspaceDashboard role={role}/>;

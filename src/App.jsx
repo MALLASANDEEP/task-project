@@ -15,7 +15,6 @@ import ProjectDetail from "./pages/ProjectDetail";
 import Teams from "./pages/Teams";
 import Tasks from "./pages/Tasks";
 import Messages from "./pages/Messages";
-import Calls from "./pages/Calls";
 import UsersManagement from "./pages/UsersManagement";
 import AdminTaskProvider from "./pages/AdminTaskProvider";
 import Settings from "./pages/Settings";
@@ -26,7 +25,7 @@ const App = () => (<QueryClientProvider client={queryClient}>
       <Toaster />
       <Sonner />
       <AuthProvider>
-        <BrowserRouter>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace/>}/>
             <Route path="/login" element={<LoginPage />}/>
@@ -39,7 +38,6 @@ const App = () => (<QueryClientProvider client={queryClient}>
               <Route path="/teams" element={<ProtectedRoute requiredPermission="teams:manage"><Teams /></ProtectedRoute>}/>
               <Route path="/tasks" element={<Tasks />}/>
               <Route path="/messages" element={<ProtectedRoute requiredPermission="chat:view"><Messages /></ProtectedRoute>}/>
-              <Route path="/calls" element={<ProtectedRoute requiredPermission="calls:join"><Calls /></ProtectedRoute>}/>
               <Route path="/users" element={<ProtectedRoute requiredPermission="users:manage"><UsersManagement /></ProtectedRoute>}/>
               <Route path="/admin-provider" element={<ProtectedRoute requiredPermission="projects:create"><AdminTaskProvider /></ProtectedRoute>}/>
               <Route path="/settings" element={<Settings />}/>

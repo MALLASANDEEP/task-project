@@ -1,9 +1,32 @@
 export const ROLES = {
     ADMIN: 'ADMIN',
     PROJECT_MANAGER: 'PROJECT_MANAGER',
+    TEAM_LEADER: 'TEAM_LEADER',
     TEAM_MEMBER: 'TEAM_MEMBER',
-    VIEWER: 'VIEWER',
 };
+
+const legacyToAppRole = {
+    TEAM_MEMBER: ROLES.TEAM_LEADER,
+    VIEWER: ROLES.TEAM_MEMBER,
+};
+
+const appToDbRole = {
+    [ROLES.ADMIN]: 'ADMIN',
+    [ROLES.PROJECT_MANAGER]: 'PROJECT_MANAGER',
+    [ROLES.TEAM_LEADER]: 'TEAM_MEMBER',
+    [ROLES.TEAM_MEMBER]: 'VIEWER',
+};
+
+export function normalizeRole(role) {
+    if (!role)
+        return role;
+    return legacyToAppRole[role] || role;
+}
+
+export function toDbRole(role) {
+    const normalized = normalizeRole(role);
+    return appToDbRole[normalized] || role;
+}
 const rolePermissions = {
     ADMIN: [
         'users:manage',
@@ -42,7 +65,7 @@ const rolePermissions = {
         'reports:view',
         'dashboard:view',
     ],
-    TEAM_MEMBER: [
+    TEAM_LEADER: [
         'tasks:update-own-status',
         'tasks:view',
         'comments:add',
@@ -51,7 +74,7 @@ const rolePermissions = {
         'calls:join',
         'dashboard:view',
     ],
-    VIEWER: [
+    TEAM_MEMBER: [
         'tasks:view',
         'reports:view',
         'chat:view',
@@ -59,13 +82,16 @@ const rolePermissions = {
     ],
 };
 export function hasPermission(role, permission) {
-    return rolePermissions[role].includes(permission);
+    const normalized = normalizeRole(role);
+    return (rolePermissions[normalized] || []).includes(permission);
 }
 export function hasAnyRole(role, roles) {
-    return roles.includes(role);
+    const normalizedRole = normalizeRole(role);
+    return roles.map((item) => normalizeRole(item)).includes(normalizedRole);
 }
 export function roleLabel(role) {
-    return role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
+    const normalized = normalizeRole(role) || '';
+    return normalized.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (char) => char.toUpperCase());
 }
 export function extractErrorMessage(error) {
     if (error instanceof AuthorizationError)

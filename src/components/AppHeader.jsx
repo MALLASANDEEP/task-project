@@ -8,8 +8,9 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import * as api from '@/services/api';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
+import { roleLabel } from '@/lib/rbac';
 export function AppHeader() {
-    const { user } = useAuth();
+    const { user, role } = useAuth();
     const { toast } = useToast();
     const [notifications, setNotifications] = useState([]);
     const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
@@ -125,6 +126,7 @@ export function AppHeader() {
             <p className="text-xs font-medium truncate max-w-[120px]">{user?.name || 'User'}</p>
             <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{user?.email || ''}</p>
           </div>
+          {role && <Badge variant="secondary" className="ml-1 text-[10px]">{roleLabel(role)}</Badge>}
         </div>
       </div>
     </header>);

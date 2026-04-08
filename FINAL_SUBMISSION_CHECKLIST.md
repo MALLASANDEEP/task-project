@@ -11,8 +11,7 @@
 ## 2. Supabase and Realtime Setup
 
 - [ ] Confirm `.env` contains `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`
-- [ ] Apply migration `supabase/migrations/005_messages_receiver_support.sql`
-- [ ] Apply migration `supabase/migrations/006_enable_realtime_for_communication.sql`
+- [ ] Apply `supabase/communication_unified_setup.sql`
 - [ ] Verify `calls`, `call_participants`, and `messages` are in `supabase_realtime` publication
 - [ ] Validate Row Level Security policies for conversations, messages, and calls
 

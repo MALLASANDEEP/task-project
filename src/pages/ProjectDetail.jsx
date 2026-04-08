@@ -42,10 +42,13 @@ export default function ProjectDetail() {
                 const usersData = await api.getUsers();
                 setUsers(usersData || []);
                 
-                const managerMember = membersData.find(m => m.role === 'manager');
+                const managerMember = (membersData || []).find(m => m.role === 'manager');
                 if (managerMember) {
                     const managerUser = usersData.find(u => u.id === managerMember.user_id);
                     setManager(managerUser || null);
+                } else {
+                    const managerFromProject = usersData.find(u => u.id === projectData?.createdBy);
+                    setManager(managerFromProject || null);
                 }
             } catch (error) {
                 console.error('Error loading project:', error);
@@ -59,10 +62,10 @@ export default function ProjectDetail() {
 
     const isManager = manager?.id === user?.id || can('projects:update');
     const projectMembers = members
-        .filter(m => m.role === 'member')
+        .filter(m => m.user_id !== manager?.id)
         .map(m => {
             const u = users.find(user => user.id === m.user_id);
-            return u ? { ...u, assignedAt: m.assigned_at } : null;
+            return u ? { ...u, assignedAt: m.assigned_at || m.created_at } : null;
         })
         .filter(Boolean);
 
@@ -144,7 +147,7 @@ export default function ProjectDetail() {
                                     <p className="font-medium">{member.name}</p>
                                     <p className="text-xs text-muted-foreground">{member.email}</p>
                                 </div>
-                                <Badge variant="outline" className="text-xs"> TEAM_MEMBER</Badge>
+                                <Badge variant="outline" className="text-xs"> TEAM_LEADER</Badge>
                             </div>
                         ))}
                         {projectMembers.length === 0 && (

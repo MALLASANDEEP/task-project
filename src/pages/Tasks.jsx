@@ -102,7 +102,7 @@ export default function Tasks() {
     return (<div className="space-y-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold">{role === 'TEAM_MEMBER' ? 'My Kanban' : 'Task Board'}</h1>
+          <h1 className="text-3xl font-semibold">{role === 'TEAM_LEADER' ? 'My Kanban' : 'Task Board'}</h1>
           <p className="text-sm text-muted-foreground mt-1">Plan, prioritize, and ship work in a clear workflow.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -325,7 +325,7 @@ function TaskForm({ users, projects, task, onSave, }) {
           <Select value={assignedTo} onValueChange={setAssignedTo} disabled={!can('tasks:assign')}>
             <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Assign To"/></SelectTrigger>
             <SelectContent>
-              {users.filter((u) => u.status === 'active' && u.role === 'TEAM_MEMBER').map((member) => (<SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>))}
+              {users.filter((u) => u.status === 'active' && u.role === 'TEAM_LEADER').map((member) => (<SelectItem key={member.id} value={member.id}>{member.name}</SelectItem>))}
             </SelectContent>
           </Select>
           {errors.assignee ? <p className="text-xs text-destructive">{errors.assignee}</p> : null}

@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { Layers } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { FloatingInput } from '@/components/ui/floating-field';
+import { roleLabel } from '@/lib/rbac';
 export default function RegisterPage() {
     const [name, setName] = useState('');
     const [email, setEmail] = useState('');
@@ -17,10 +18,11 @@ export default function RegisterPage() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
-        const ok = await register(name, email, password);
+        const registeredUser = await register(name, email, password);
         setLoading(false);
-        if (ok) {
-            toast({ title: 'Account created', description: 'Welcome to TaskFlow!' });
+        if (registeredUser) {
+            const userRole = registeredUser.role ? roleLabel(registeredUser.role) : 'Team Member';
+            toast({ title: 'Account created', description: `Welcome to TaskFlow! You've been assigned as ${userRole}.` });
             navigate('/dashboard');
         } else {
             toast({ title: 'Registration failed', description: 'Email may already be in use or there was a connection issue. Try again.', variant: 'destructive' });
@@ -38,7 +40,7 @@ export default function RegisterPage() {
         <Card>
           <CardHeader>
             <CardTitle>Create account</CardTitle>
-            <CardDescription>Get started with your team</CardDescription>
+            <CardDescription>Join as a Team Member and collaborate with your team</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">

@@ -7,7 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import * as api from '@/services/api';
 import { useToast } from '@/hooks/use-toast';
 import { Calendar, FolderKanban, UserPlus } from 'lucide-react';
@@ -53,7 +53,7 @@ export default function AdminTaskProvider() {
         }
         return map;
     }, [projects]);
-    const activeUsers = useMemo(() => users.filter((u) => u.role === 'TEAM_MEMBER' && u.status === 'active'), [users]);
+    const activeUsers = useMemo(() => users.filter((u) => u.role === 'TEAM_LEADER' && u.status === 'active'), [users]);
     const newUsers = useMemo(() => {
         const now = Date.now();
         const recentMs = NEW_USER_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -81,9 +81,10 @@ export default function AdminTaskProvider() {
             return;
         }
         try {
-            await api.updateProject(project.id, {
-                assignedUsers: [...project.assignedUsers, userId],
-            });
+          const members = await api.getProjectMembers(project.id);
+          const currentIds = (members || []).map((member) => member.user_id);
+          const nextIds = Array.from(new Set([...currentIds, userId]));
+          await api.assignProjectMembers(project.id, nextIds);
             toast({ title: 'User assigned to project' });
             load();
         }
@@ -141,6 +142,9 @@ export default function AdminTaskProvider() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Create project for a new user</DialogTitle>
+              <DialogDescription className="sr-only">
+                Create a new project and assign it to a selected team member.
+              </DialogDescription>
             </DialogHeader>
             <form onSubmit={handleCreateAndAssign} className="space-y-4">
               <div className="space-y-2">
