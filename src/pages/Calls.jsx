@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,7 +16,7 @@ export default function CallsPage() {
     const [activeCalls, setActiveCalls] = useState([]);
     const [selectedConversationId, setSelectedConversationId] = useState('');
     const [selectedCall, setSelectedCall] = useState(null);
-    const load = async () => {
+    const load = useCallback(async () => {
         try {
             const [conversationData, callData] = await Promise.all([
                 api.getConversations(),
@@ -24,32 +24,37 @@ export default function CallsPage() {
             ]);
             setConversations(conversationData);
             setActiveCalls(callData);
-            if (!selectedConversationId && conversationData.length > 0) {
-                setSelectedConversationId(conversationData[0].id);
-            }
+        setSelectedConversationId((prev) => (prev || conversationData[0]?.id || ''));
+        setSelectedCall((prev) => {
+          if (!prev)
+            return prev;
+          return callData.find((call) => call.id === prev.id) || null;
+        });
+        return callData;
         }
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
+        return [];
         }
-    };
+    }, [toast]);
     useEffect(() => {
-        load();
-        const unsubscribe = api.subscribeCommunicationEvents((event) => {
-            if (event.type === 'call:update') {
-                load();
-                setSelectedCall(event.call.status === 'ended' ? null : event.call);
+      load();
+      const unsubscribe = api.subscribeToActiveCalls(async (event) => {
+        const latestCalls = await load();
+        if (event.type === 'call:update' && event.call) {
+          setSelectedCall(event.call.status === 'ended' ? null : event.call);
+          return;
+        }
+        if (event.callId) {
+          setSelectedCall((prev) => {
+            if (!prev || prev.id !== event.callId)
+              return prev;
+            return latestCalls.find((call) => call.id === event.callId) || null;
+          });
             }
         });
         return unsubscribe;
-    }, []);
-    useEffect(() => {
-        const timer = window.setInterval(() => {
-            load();
-        }, 2500);
-        return () => {
-            window.clearInterval(timer);
-        };
-    }, []);
+    }, [load]);
     const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId), [conversations, selectedConversationId]);
     const startCall = async (type) => {
         if (!selectedConversationId)
@@ -57,6 +62,7 @@ export default function CallsPage() {
         try {
             const call = await api.startCall(selectedConversationId, type);
             setSelectedCall(call);
+          await load();
             toast({ title: `${type === 'video' ? 'Video' : 'Audio'} call started` });
         }
         catch (error) {
@@ -69,6 +75,7 @@ export default function CallsPage() {
         try {
             const updated = await api.joinCall(selectedCall.id);
             setSelectedCall(updated);
+          await load();
             toast({ title: 'Joined call' });
         }
         catch (error) {
@@ -80,6 +87,7 @@ export default function CallsPage() {
             return;
         await api.endCall(selectedCall.id);
         setSelectedCall(null);
+      await load();
         toast({ title: 'Call ended' });
     };
     return (<div className="space-y-6">

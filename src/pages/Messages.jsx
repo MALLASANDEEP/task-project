@@ -58,9 +58,6 @@ export default function MessagesPage() {
     useEffect(() => {
         loadBase();
         const unsubscribe = api.subscribeCommunicationEvents((event) => {
-            if (event.type === 'message:new' && event.conversationId === selectedConversationId) {
-                setMessages((prev) => [...prev, event.message]);
-            }
             if (event.type === 'message:new' || event.type === 'conversation:update') {
                 loadBase();
             }
@@ -71,12 +68,23 @@ export default function MessagesPage() {
         return unsubscribe;
     }, [selectedConversationId]);
     useEffect(() => {
+      if (!selectedConversationId)
+        return;
+      const unsubscribeRealtime = api.subscribeToConversationMessages(selectedConversationId, (incomingMessage) => {
+        setMessages((prev) => prev.some((item) => item.id === incomingMessage.id) ? prev : [...prev, incomingMessage]);
+        if (incomingMessage.senderId !== user?.id) {
+          api.markMessagesSeen(selectedConversationId).catch(() => undefined);
+        }
+      });
+      return unsubscribeRealtime;
+    }, [selectedConversationId, user?.id]);
+    useEffect(() => {
         const timer = window.setInterval(() => {
             loadBase();
             if (selectedConversationId) {
                 loadMessages(selectedConversationId);
             }
-        }, 2500);
+      }, 15000);
         return () => {
             window.clearInterval(timer);
         };

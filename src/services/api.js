@@ -188,6 +188,84 @@ export function subscribeCommunicationEvents(listener) {
         commListeners.delete(listener);
     };
 }
+export function subscribeToActiveCalls(onUpdate) {
+    if (supabase) {
+        const channel = supabase
+            .channel(`calls:${activeUserId || 'anon'}:${Date.now()}`)
+            .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'calls',
+        }, (payload) => {
+            onUpdate({
+                type: 'call:refresh',
+                callId: payload.new?.id || payload.old?.id,
+            });
+        })
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }
+    return subscribeCommunicationEvents((event) => {
+        if (event.type === 'call:update') {
+            onUpdate({ type: 'call:update', call: event.call, callId: event.call?.id });
+        }
+    });
+}
+function mapMessageRow(row, receiptRows = []) {
+    return {
+        id: row.id,
+        conversationId: row.conversation_id,
+        senderId: row.sender_id,
+        receiverId: row.receiver_id || undefined,
+        content: row.content,
+        type: row.message_type,
+        fileUrl: row.file_url || undefined,
+        mentions: row.mentions || [],
+        status: row.delivery_status,
+        seenBy: (receiptRows || [])
+            .filter((receipt) => receipt.message_id === row.id && Boolean(receipt.seen_at))
+            .map((receipt) => receipt.user_id),
+        createdAt: row.created_at,
+    };
+}
+function buildDirectMessageFilter(currentUserId, otherUserId) {
+    return `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`;
+}
+export function subscribeToConversationMessages(conversationId, onMessage) {
+    if (!conversationId) {
+        return () => { };
+    }
+    if (supabase) {
+        const channel = supabase
+            .channel(`messages:${conversationId}:${activeUserId || 'anon'}:${Date.now()}`)
+            .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+        }, (payload) => {
+            const row = payload.new;
+            if (!row || !row.id)
+                return;
+            const mapped = mapMessageRow(row, []);
+            onMessage(mapped);
+            emitCommunicationEvent({ type: 'message:new', conversationId, message: mapped });
+            emitCommunicationEvent({ type: 'conversation:update', conversationId });
+        })
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }
+    const unsubscribe = subscribeCommunicationEvents((event) => {
+        if (event.type === 'message:new' && event.conversationId === conversationId) {
+            onMessage(event.message);
+        }
+    });
+    return unsubscribe;
+}
 function createNotification(userId, title, message, type) {
     const nextNotification = {
         id: `n${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
@@ -1145,6 +1223,11 @@ export async function getConversationMessages(conversationId) {
     const actor = await requirePermission('chat:view');
     if (supabase) {
         try {
+            const { data: conversationRow } = await supabase
+                .from('conversations')
+                .select('id,type')
+                .eq('id', conversationId)
+                .maybeSingle();
             const { data: membership } = await supabase
                 .from('conversation_members')
                 .select('conversation_id')
@@ -1153,31 +1236,45 @@ export async function getConversationMessages(conversationId) {
                 .maybeSingle();
             if (!membership)
                 throw new AuthorizationError('Forbidden');
-            const { data: messageRows, error: messageError } = await supabase
+            const { data: membershipRows } = await supabase
+                .from('conversation_members')
+                .select('user_id')
+                .eq('conversation_id', conversationId);
+            const participants = (membershipRows || []).map((row) => row.user_id);
+            const otherParticipantId = participants.find((participantId) => participantId !== actor.id);
+
+            let messageQuery = supabase
                 .from('messages')
                 .select('*')
                 .eq('conversation_id', conversationId)
                 .order('created_at', { ascending: true });
+
+            if (conversationRow?.type === 'direct' && otherParticipantId) {
+                messageQuery = supabase
+                    .from('messages')
+                    .select('*')
+                    .eq('conversation_id', conversationId)
+                    .or(buildDirectMessageFilter(actor.id, otherParticipantId))
+                    .order('created_at', { ascending: true });
+            }
+
+            let { data: messageRows, error: messageError } = await messageQuery;
+            if (messageError && conversationRow?.type === 'direct' && otherParticipantId) {
+                const retry = await supabase
+                    .from('messages')
+                    .select('*')
+                    .eq('conversation_id', conversationId)
+                    .order('created_at', { ascending: true });
+                messageRows = retry.data;
+                messageError = retry.error;
+            }
             if (messageError)
                 throw messageError;
             const messageIds = (messageRows || []).map((row) => row.id);
             const { data: receiptRows } = messageIds.length
                 ? await supabase.from('message_receipts').select('message_id,user_id,seen_at').in('message_id', messageIds)
                 : { data: [] };
-            return (messageRows || []).map((row) => ({
-                id: row.id,
-                conversationId: row.conversation_id,
-                senderId: row.sender_id,
-                content: row.content,
-                type: row.message_type,
-                fileUrl: row.file_url || undefined,
-                mentions: row.mentions || [],
-                status: row.delivery_status,
-                seenBy: (receiptRows || [])
-                    .filter((receipt) => receipt.message_id === row.id && Boolean(receipt.seen_at))
-                    .map((receipt) => receipt.user_id),
-                createdAt: row.created_at,
-            }));
+            return (messageRows || []).map((row) => mapMessageRow(row, receiptRows || []));
         }
         catch {
             // Fall through to local mode
@@ -1206,6 +1303,9 @@ export async function sendMessage(input) {
                 .select('user_id')
                 .eq('conversation_id', input.conversationId);
             const participants = (membershipRows || []).map((row) => row.user_id);
+            const receiverId = conversationRow.type === 'direct'
+                ? participants.find((participantId) => participantId !== actor.id) || null
+                : null;
             const conversation = {
                 id: conversationRow.id,
                 type: conversationRow.type,
@@ -1223,21 +1323,38 @@ export async function sendMessage(input) {
             if (!content && !input.fileUrl)
                 throw new Error('Message cannot be empty');
             const mentions = extractMentionUserIds(content).filter((id) => id !== actor.id);
-            const { data: insertedMessage, error: insertMessageError } = await supabase
+            const messagePayload = {
+                conversation_id: input.conversationId,
+                sender_id: actor.id,
+                receiver_id: receiverId,
+                content,
+                message_type: input.type || 'text',
+                file_url: input.fileUrl || null,
+                mentions,
+                delivery_status: 'delivered',
+            };
+            let { data: insertedMessage, error: insertMessageError } = await supabase
                 .from('messages')
-                .insert([
-                {
-                    conversation_id: input.conversationId,
-                    sender_id: actor.id,
-                    content,
-                    message_type: input.type || 'text',
-                    file_url: input.fileUrl || null,
-                    mentions,
-                    delivery_status: 'delivered',
-                },
-            ])
+                .insert([messagePayload])
                 .select()
                 .single();
+            if (insertMessageError && String(insertMessageError.message || '').toLowerCase().includes('receiver_id')) {
+                const fallbackInsert = await supabase
+                    .from('messages')
+                    .insert([{
+                        conversation_id: input.conversationId,
+                        sender_id: actor.id,
+                        content,
+                        message_type: input.type || 'text',
+                        file_url: input.fileUrl || null,
+                        mentions,
+                        delivery_status: 'delivered',
+                    }])
+                    .select()
+                    .single();
+                insertedMessage = fallbackInsert.data;
+                insertMessageError = fallbackInsert.error;
+            }
             if (insertMessageError)
                 throw insertMessageError;
             await supabase.from('conversations').update({ last_message_at: insertedMessage.created_at }).eq('id', input.conversationId);
@@ -1252,18 +1369,7 @@ export async function sendMessage(input) {
             mentions.forEach((mentionedUserId) => {
                 createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention');
             });
-            const mapped = {
-                id: insertedMessage.id,
-                conversationId: insertedMessage.conversation_id,
-                senderId: insertedMessage.sender_id,
-                content: insertedMessage.content,
-                type: insertedMessage.message_type,
-                fileUrl: insertedMessage.file_url || undefined,
-                mentions: insertedMessage.mentions || [],
-                status: insertedMessage.delivery_status,
-                seenBy: [actor.id],
-                createdAt: insertedMessage.created_at,
-            };
+            const mapped = mapMessageRow(insertedMessage, [{ message_id: insertedMessage.id, user_id: actor.id, seen_at: insertedMessage.created_at }]);
             emitCommunicationEvent({ type: 'message:new', conversationId: input.conversationId, message: mapped });
             emitCommunicationEvent({ type: 'conversation:update', conversationId: input.conversationId });
             return mapped;
