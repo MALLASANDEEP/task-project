@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import * as api from '@/services/api';
-import { AlertTriangle, CheckCircle2, CircleDot, Clock3, FolderKanban, ListChecks, TrendingUp, } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, CircleDot, Clock3, FolderKanban, ListChecks, TrendingUp, ArrowRight, Users } from 'lucide-react';
 import { roleLabel } from '@/lib/rbac';
 import { Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, } from 'recharts';
 export default function Dashboard() {
@@ -14,16 +16,20 @@ export default function Dashboard() {
     return <WorkspaceDashboard role={role}/>;
 }
 function WorkspaceDashboard({ role }) {
+    const navigate = useNavigate();
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
+    const [teams, setTeams] = useState([]);
     useEffect(() => {
         const load = async () => {
-            const [taskData, projectData] = await Promise.all([
+            const [taskData, projectData, teamsData] = await Promise.all([
                 api.getTasks().catch(() => []),
                 api.getProjects().catch(() => []),
+                api.getTeams().catch(() => []),
             ]);
             setTasks(taskData);
             setProjects(projectData);
+            setTeams(teamsData);
         };
         load();
     }, []);
@@ -67,7 +73,7 @@ function WorkspaceDashboard({ role }) {
         </div>
         <Badge variant="outline" className="w-fit rounded-full border-primary/25 bg-primary/5 text-primary px-3 py-1">
           <TrendingUp className="mr-1 h-3.5 w-3.5"/>
-          Productivity +12% this week
+          {teams.length} teams • {projects.length} projects
         </Badge>
       </div>
 
@@ -130,14 +136,24 @@ function WorkspaceDashboard({ role }) {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Recent Tasks</CardTitle>
-            <CardDescription>Latest updates from your workspace</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">Recent Tasks</CardTitle>
+              <CardDescription>Latest updates from your workspace</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {tasks.slice(0, 6).map((task) => (<div key={task.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3">
+            {tasks.slice(0, 5).map((task) => (<div 
+              key={task.id} 
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/tasks')}
+            >
                 <div>
                   <p className="text-sm font-medium">{task.title}</p>
                   <p className="text-xs text-muted-foreground">Due {new Date(task.dueDate).toLocaleDateString()}</p>
@@ -149,12 +165,22 @@ function WorkspaceDashboard({ role }) {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Projects Overview</CardTitle>
-            <CardDescription>Project priority and delivery timeline</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">Projects</CardTitle>
+              <CardDescription>Project priority and delivery timeline</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/projects')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {projects.slice(0, 6).map((project) => (<div key={project.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3">
+            {projects.slice(0, 5).map((project) => (<div 
+              key={project.id}
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/projects')}
+            >
                 <div>
                   <p className="text-sm font-medium">{project.title}</p>
                   <p className="text-xs text-muted-foreground">Due {new Date(project.deadline).toLocaleDateString()}</p>
@@ -164,20 +190,53 @@ function WorkspaceDashboard({ role }) {
             {projects.length === 0 && <EmptyState message="No projects available for this workspace."/>}
           </CardContent>
         </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">Teams</CardTitle>
+              <CardDescription>Delivery groups and members</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/teams')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {teams.slice(0, 5).map((team) => (<div 
+              key={team.id}
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/teams')}
+            >
+                <div>
+                  <p className="text-sm font-medium">{team.name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3"/>{team.members?.length || 0} members</p>
+                </div>
+                <Badge variant="outline" className="text-xs">{team.projects?.length || 0} projects</Badge>
+              </div>))}
+            {teams.length === 0 && <EmptyState message="No teams created yet. Create a team to organize your work."/>}
+          </CardContent>
+        </Card>
       </div>
     </div>);
 }
 function MemberDashboard({ userId }) {
+    const navigate = useNavigate();
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
+    const [teams, setTeams] = useState([]);
     useEffect(() => {
         const load = async () => {
-            const [taskData, projectData] = await Promise.all([
+            const [taskData, projectData, teamsData] = await Promise.all([
                 api.getTasksForUser(userId).catch(() => []),
                 api.getProjectsForUser(userId).catch(() => []),
+                api.getTeams().catch(() => []),
             ]);
             setTasks(taskData);
             setProjects(projectData);
+            // Filter teams that the user is a member of
+            const userTeams = teamsData.filter((team) => team.members?.includes(userId)) || [];
+            setTeams(userTeams);
         };
         load();
     }, [userId]);
@@ -196,14 +255,24 @@ function MemberDashboard({ userId }) {
         <SummaryCard title="Overdue" value={overdue} icon={AlertTriangle} color="text-destructive" tone="bg-destructive/10"/>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">My Tasks</CardTitle>
-            <CardDescription>Tasks assigned to you</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">My Tasks</CardTitle>
+              <CardDescription>Tasks assigned to you</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {tasks.map((task) => (<div key={task.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3">
+            {tasks.slice(0, 5).map((task) => (<div 
+              key={task.id}
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/tasks')}
+            >
                 <div>
                   <p className="text-sm font-medium">{task.title}</p>
                   <p className="text-xs text-muted-foreground">Due {new Date(task.dueDate).toLocaleDateString()}</p>
@@ -215,12 +284,22 @@ function MemberDashboard({ userId }) {
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg">Active Projects</CardTitle>
-            <CardDescription>Projects where you are a contributor</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">My Projects</CardTitle>
+              <CardDescription>Projects where you contribute</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/projects')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {projects.map((project) => (<div key={project.id} className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3">
+            {projects.slice(0, 5).map((project) => (<div 
+              key={project.id}
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/projects')}
+            >
                 <div className="flex items-center gap-2">
                   <div className="rounded-lg bg-primary/10 p-2 text-primary">
                     <FolderKanban className="h-4 w-4"/>
@@ -233,6 +312,32 @@ function MemberDashboard({ userId }) {
                 <PriorityBadge priority={project.priority}/>
               </div>))}
             {projects.length === 0 && <EmptyState message="No projects assigned to your account."/>}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
+            <div>
+              <CardTitle className="text-lg">My Teams</CardTitle>
+              <CardDescription>Teams you're part of</CardDescription>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => navigate('/teams')} className="gap-1">
+              View All
+              <ArrowRight className="h-4 w-4"/>
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {teams.slice(0, 5).map((team) => (<div 
+              key={team.id}
+              className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
+              onClick={() => navigate('/teams')}
+            >
+                <div>
+                  <p className="text-sm font-medium">{team.name}</p>
+                  <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="h-3 w-3"/>{team.members?.length || 0} members</p>
+                </div>
+              </div>))}
+            {teams.length === 0 && <EmptyState message="No teams yet. Ask admin to add you to a team."/>}
           </CardContent>
         </Card>
       </div>

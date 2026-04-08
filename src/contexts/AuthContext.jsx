@@ -24,22 +24,54 @@ export function AuthProvider({ children }) {
             localStorage.removeItem('taskflow_auth');
         }
     }, [state]);
+    useEffect(() => {
+        let mounted = true;
+        async function restore() {
+            const result = await api.restoreSession();
+            if (!mounted)
+                return;
+            if (result) {
+                setState({ user: result.user, token: result.token, isAuthenticated: true });
+                api.setActiveUserId(result.user.id);
+            }
+            else if (state.isAuthenticated) {
+                setState({ user: null, token: null, isAuthenticated: false });
+                api.setActiveUserId(null);
+            }
+        }
+        restore();
+        return () => {
+            mounted = false;
+        };
+    }, []);
     const loginFn = useCallback(async (email, password) => {
-        const result = await api.login(email, password);
-        if (!result)
+        try {
+            const result = await api.login(email, password);
+            if (!result)
+                return false;
+            api.setActiveUserId(result.user.id);
+            setState({ user: result.user, token: result.token, isAuthenticated: true });
+            return true;
+        } catch (err) {
+            console.error('[AuthContext] Login error:', err);
             return false;
-        api.setActiveUserId(result.user.id);
-        setState({ user: result.user, token: result.token, isAuthenticated: true });
-        return true;
+        }
     }, []);
     const registerFn = useCallback(async (name, email, password) => {
-        const result = await api.register(name, email, password);
-        api.setActiveUserId(result.user.id);
-        setState({ user: result.user, token: result.token, isAuthenticated: true });
-        return true;
+        try {
+            const result = await api.register(name, email, password);
+            if (!result)
+                return false;
+            api.setActiveUserId(result.user.id);
+            setState({ user: result.user, token: result.token, isAuthenticated: true });
+            return true;
+        } catch (err) {
+            console.error('[AuthContext] Register error:', err);
+            return false;
+        }
     }, []);
-    const logout = useCallback(() => {
-        api.setActiveUserId(null);
+    const logout = useCallback(async () => {
+        await api.logout();
         setState({ user: null, token: null, isAuthenticated: false });
     }, []);
     const updateProfile = useCallback((data) => {

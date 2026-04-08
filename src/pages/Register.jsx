@@ -17,10 +17,14 @@ export default function RegisterPage() {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
-        await register(name, email, password);
+        const ok = await register(name, email, password);
         setLoading(false);
-        toast({ title: 'Account created', description: 'Welcome to TaskFlow!' });
-        navigate('/dashboard');
+        if (ok) {
+            toast({ title: 'Account created', description: 'Welcome to TaskFlow!' });
+            navigate('/dashboard');
+        } else {
+            toast({ title: 'Registration failed', description: 'Email may already be in use or there was a connection issue. Try again.', variant: 'destructive' });
+        }
     };
     return (<div className="min-h-screen flex items-center justify-center px-4 py-8">
       <div className="absolute inset-0 subtle-grid opacity-25 pointer-events-none"/>
