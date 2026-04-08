@@ -55,7 +55,7 @@ export default function ProjectDetail() {
             }
         };
         load();
-    }, [projectId]);
+    }, [projectId, toast]);
 
     const isManager = manager?.id === user?.id || can('projects:update');
     const projectMembers = members

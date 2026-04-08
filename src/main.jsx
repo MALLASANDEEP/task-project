@@ -1,5 +1,11 @@
 import { createRoot } from "react-dom/client";
 import App from "./App";
 import "./index.css";
-createRoot(document.getElementById("root")).render(<App />);
+import { AppErrorBoundary } from "@/components/AppErrorBoundary";
+
+createRoot(document.getElementById("root")).render(
+	<AppErrorBoundary>
+		<App />
+	</AppErrorBoundary>
+);
 

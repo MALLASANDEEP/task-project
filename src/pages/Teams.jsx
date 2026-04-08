@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -21,7 +21,9 @@ export default function Teams() {
     const [search, setSearch] = useState('');
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingTeam, setEditingTeam] = useState(null);
-    const load = async () => {
+    const [isLoading, setIsLoading] = useState(true);
+    const load = useCallback(async () => {
+      setIsLoading(true);
         try {
             const teamsData = await api.getTeams();
             setTeams(teamsData);
@@ -43,10 +45,13 @@ export default function Teams() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
+        finally {
+          setIsLoading(false);
+        }
+      }, [toast]);
     useEffect(() => {
         load();
-    }, []);
+      }, [load]);
     const activeUsers = useMemo(() => users.filter((teamMember) => teamMember.status === 'active' && teamMember.role === 'TEAM_MEMBER'), [users]);
     const filteredTeams = teams.filter((team) => {
         const query = search.toLowerCase();
@@ -130,6 +135,9 @@ export default function Teams() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        {isLoading && (<Card className="border-dashed xl:col-span-2">
+            <CardContent className="p-8 text-center text-sm text-muted-foreground">Loading teams...</CardContent>
+          </Card>)}
         {filteredTeams.map((team) => (<Card key={team.id} className="overflow-hidden">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-3">
@@ -181,6 +189,11 @@ export default function Teams() {
               </div>
             </CardContent>
           </Card>))}
+        {!isLoading && filteredTeams.length === 0 && (<Card className="border-dashed xl:col-span-2">
+            <CardContent className="p-8 text-center text-sm text-muted-foreground">
+              No teams found for your search.
+            </CardContent>
+          </Card>)}
       </div>
     </div>);
 }

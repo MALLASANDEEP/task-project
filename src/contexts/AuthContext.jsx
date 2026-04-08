@@ -34,8 +34,10 @@ export function AuthProvider({ children }) {
                 setState({ user: result.user, token: result.token, isAuthenticated: true });
                 api.setActiveUserId(result.user.id);
             }
-            else if (state.isAuthenticated) {
-                setState({ user: null, token: null, isAuthenticated: false });
+            else {
+                setState((previous) => previous.isAuthenticated
+                    ? { user: null, token: null, isAuthenticated: false }
+                    : previous);
                 api.setActiveUserId(null);
             }
         }

@@ -28,4 +28,10 @@ export default [
       "no-unused-vars": "off",
     },
   },
+  {
+    files: ["src/components/ui/**/*.{js,jsx}", "src/contexts/**/*.{js,jsx}"],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
 ];

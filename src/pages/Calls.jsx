@@ -16,7 +16,9 @@ export default function CallsPage() {
     const [activeCalls, setActiveCalls] = useState([]);
     const [selectedConversationId, setSelectedConversationId] = useState('');
     const [selectedCall, setSelectedCall] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
     const load = useCallback(async () => {
+      setIsLoading(true);
         try {
             const [conversationData, callData] = await Promise.all([
                 api.getConversations(),
@@ -35,6 +37,9 @@ export default function CallsPage() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         return [];
+        }
+        finally {
+          setIsLoading(false);
         }
     }, [toast]);
     useEffect(() => {
@@ -115,10 +120,10 @@ export default function CallsPage() {
           </Select>
 
           <div className="flex gap-2">
-            <Button onClick={() => startCall('audio')} disabled={!can('calls:initiate') || !selectedConversation}>
+            <Button onClick={() => startCall('audio')} disabled={isLoading || !can('calls:initiate') || !selectedConversation}>
               <Phone className="mr-1 h-4 w-4"/> Audio Call
             </Button>
-            <Button onClick={() => startCall('video')} disabled={!can('calls:initiate') || !selectedConversation}>
+            <Button onClick={() => startCall('video')} disabled={isLoading || !can('calls:initiate') || !selectedConversation}>
               <Video className="mr-1 h-4 w-4"/> Video Call
             </Button>
           </div>
@@ -132,6 +137,9 @@ export default function CallsPage() {
           <CardTitle className="text-lg">Active / Incoming Calls</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
+          {isLoading && (<div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              Loading calls...
+            </div>)}
           {activeCalls.map((call) => (<button key={call.id} onClick={() => setSelectedCall(call)} className="w-full rounded-xl border border-border/70 p-3 text-left hover:bg-muted/30">
               <div className="flex items-center justify-between">
                 <p className="font-medium capitalize">{call.type} call</p>
@@ -142,7 +150,7 @@ export default function CallsPage() {
               </p>
             </button>))}
 
-          {activeCalls.length === 0 && (<div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+          {!isLoading && activeCalls.length === 0 && (<div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
               No active calls right now.
             </div>)}
         </CardContent>

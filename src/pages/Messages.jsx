@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -23,7 +23,10 @@ export default function MessagesPage() {
     const [searchResults, setSearchResults] = useState([]);
     const [selectedUserForDm, setSelectedUserForDm] = useState('');
     const [selectedProjectForGroup, setSelectedProjectForGroup] = useState('');
-    const loadBase = async () => {
+    const [isBaseLoading, setIsBaseLoading] = useState(true);
+    const [isMessagesLoading, setIsMessagesLoading] = useState(false);
+    const loadBase = useCallback(async () => {
+      setIsBaseLoading(true);
         try {
             const [conversationData, userData, projectData] = await Promise.all([
                 api.getConversations(),
@@ -40,10 +43,14 @@ export default function MessagesPage() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
-    const loadMessages = async (conversationId) => {
+        finally {
+          setIsBaseLoading(false);
+        }
+      }, [selectedConversationId, toast]);
+      const loadMessages = useCallback(async (conversationId) => {
         if (!conversationId)
             return;
+        setIsMessagesLoading(true);
         try {
             const messageData = await api.getConversationMessages(conversationId);
             setMessages(messageData);
@@ -54,7 +61,10 @@ export default function MessagesPage() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
+        finally {
+          setIsMessagesLoading(false);
+        }
+      }, [toast]);
     useEffect(() => {
         loadBase();
         const unsubscribe = api.subscribeCommunicationEvents((event) => {
@@ -66,7 +76,7 @@ export default function MessagesPage() {
             }
         });
         return unsubscribe;
-    }, [selectedConversationId]);
+    }, [loadBase, selectedConversationId]);
     useEffect(() => {
       if (!selectedConversationId)
         return;
@@ -77,7 +87,7 @@ export default function MessagesPage() {
         }
       });
       return unsubscribeRealtime;
-    }, [selectedConversationId, user?.id]);
+    }, [loadMessages, selectedConversationId, user?.id]);
     useEffect(() => {
         const timer = window.setInterval(() => {
             loadBase();
@@ -88,10 +98,10 @@ export default function MessagesPage() {
         return () => {
             window.clearInterval(timer);
         };
-    }, [selectedConversationId]);
+    }, [loadBase, loadMessages, selectedConversationId]);
     useEffect(() => {
         loadMessages(selectedConversationId);
-    }, [selectedConversationId]);
+    }, [loadMessages, selectedConversationId]);
     const selectedConversation = useMemo(() => conversations.find((conversation) => conversation.id === selectedConversationId) || null, [conversations, selectedConversationId]);
     const usersById = useMemo(() => Object.fromEntries(users.map((item) => [item.id, item])), [users]);
     const visibleConversations = useMemo(() => {
@@ -102,7 +112,7 @@ export default function MessagesPage() {
             const title = getConversationTitle(conversation, usersById, projects, user?.id || '').toLowerCase();
             return title.includes(query);
         });
-    }, [conversations, searchQuery, usersById, projects]);
+    }, [conversations, searchQuery, usersById, projects, user?.id]);
     const typingLabel = typingUsers
         .map((typingUserId) => usersById[typingUserId]?.name || 'Someone')
         .slice(0, 2)
@@ -212,20 +222,25 @@ export default function MessagesPage() {
           </CardHeader>
 
           <CardContent className="space-y-2 overflow-y-auto">
+            {isBaseLoading && (<div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                Loading conversations...
+              </div>)}
             {visibleConversations.map((conversation) => (<button key={conversation.id} onClick={() => setSelectedConversationId(conversation.id)} className={`w-full rounded-xl border p-3 text-left transition ${selectedConversationId === conversation.id
                 ? 'border-primary/35 bg-primary/5'
                 : 'border-border/70 hover:bg-muted/30'}`}>
                 <p className="text-sm font-medium">{getConversationTitle(conversation, usersById, projects, user?.id || '')}</p>
                 <p className="text-[11px] text-muted-foreground mt-1 capitalize">{conversation.type} chat</p>
               </button>))}
-            {visibleConversations.length === 0 && (<div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            {!isBaseLoading && visibleConversations.length === 0 && (<div className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
                 No conversations available.
               </div>)}
           </CardContent>
         </Card>
 
         <div className="h-[72vh]">
-          {selectedConversation ? (<ChatBox messages={messages} currentUserId={user.id} users={users} disabled={!can('chat:send')} typingLabel={typingLabel ? `${typingLabel} is typing...` : undefined} onSend={handleSend} onTyping={handleTyping}/>) : (<div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-card/60 text-muted-foreground">
+          {isMessagesLoading && selectedConversation ? (<div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-card/60 text-muted-foreground">
+              Loading messages...
+            </div>) : selectedConversation ? (<ChatBox messages={messages} currentUserId={user.id} users={users} disabled={!can('chat:send')} typingLabel={typingLabel ? `${typingLabel} is typing...` : undefined} onSend={handleSend} onTyping={handleTyping}/>) : (<div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border bg-card/60 text-muted-foreground">
               <div className="text-center">
                 <MessageCircle className="mx-auto h-8 w-8 mb-2"/>
                 Select or create a conversation to start chatting.

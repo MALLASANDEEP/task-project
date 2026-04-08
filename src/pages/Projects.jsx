@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -22,8 +22,10 @@ export default function Projects() {
     const [priorityFilter, setPriorityFilter] = useState('all');
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
     const { toast } = useToast();
-    const load = async () => {
+    const load = useCallback(async () => {
+      setIsLoading(true);
         try {
             const projectsData = role === 'TEAM_MEMBER' ? await api.getProjectsForUser(user.id) : await api.getProjects();
             setProjects(projectsData);
@@ -38,8 +40,11 @@ export default function Projects() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
-    useEffect(() => { load(); }, [role, user]);
+        finally {
+          setIsLoading(false);
+        }
+      }, [role, toast, user.id]);
+      useEffect(() => { load(); }, [load]);
     const filtered = projects.filter(p => {
         const matchSearch = p.title.toLowerCase().includes(search.toLowerCase());
         const matchPriority = priorityFilter === 'all' || p.priority === priorityFilter;
@@ -88,6 +93,9 @@ export default function Projects() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {isLoading && (<Card className="border-dashed md:col-span-2 xl:col-span-3">
+            <CardContent className="p-8 text-center text-sm text-muted-foreground">Loading projects...</CardContent>
+          </Card>)}
         {filtered.map(p => (<Card key={p.id} className="hover:shadow-md transition-shadow cursor-pointer hover:border-primary/50" onClick={() => navigate(`/projects/${p.id}`)}>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
@@ -114,6 +122,11 @@ export default function Projects() {
                 </div>)}
             </CardContent>
           </Card>))}
+        {!isLoading && filtered.length === 0 && (<Card className="border-dashed md:col-span-2 xl:col-span-3">
+            <CardContent className="p-8 text-center text-sm text-muted-foreground">
+              No projects match your current filters.
+            </CardContent>
+          </Card>)}
       </div>
     </div>);
 }

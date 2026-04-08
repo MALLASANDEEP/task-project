@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -30,7 +30,7 @@ export default function Tasks() {
     const [commentTask, setCommentTask] = useState(null);
     const [draggingTaskId, setDraggingTaskId] = useState(null);
     const { toast } = useToast();
-    const load = async () => {
+    const load = useCallback(async () => {
         const [tasksData, usersData, projectsData] = await Promise.all([
             api.getTasks().catch(() => []),
             api.getUsers().catch(() => []),
@@ -39,12 +39,12 @@ export default function Tasks() {
         setTasks(tasksData);
         setUsers(usersData);
         setProjects(projectsData);
-    };
+    }, []);
     useEffect(() => {
         load().catch((error) => {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         });
-    }, [role, user]);
+    }, [load, role, toast, user]);
     const filtered = useMemo(() => {
         return tasks.filter((task) => {
             const s = search.toLowerCase();

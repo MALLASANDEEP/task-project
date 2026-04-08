@@ -5,7 +5,42 @@
 import { supabase } from '@/lib/supabase';
 import { AuthorizationError, hasPermission } from '@/lib/rbac';
 let activeUserId = null;
-const typingStates = [];
+let typingStates = [];
+let projects = [];
+let conversations = [];
+let chatMessages = [];
+let callSessions = [];
+function sleep(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+function shouldRetry(error) {
+    if (!error)
+        return false;
+    const status = Number(error.status || error.code || 0);
+    if ([408, 425, 429, 500, 502, 503, 504].includes(status))
+        return true;
+    const message = String(error.message || '').toLowerCase();
+    return message.includes('network') ||
+        message.includes('timeout') ||
+        message.includes('temporarily') ||
+        message.includes('fetch');
+}
+async function withRetry(operation, options = {}) {
+    const retries = options.retries ?? 2;
+    const baseDelayMs = options.baseDelayMs ?? 250;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+        try {
+            return await operation();
+        }
+        catch (error) {
+            if (attempt >= retries || !shouldRetry(error)) {
+                throw error;
+            }
+            await sleep(baseDelayMs * (attempt + 1));
+        }
+    }
+    throw new Error('Retry loop terminated unexpectedly');
+}
 function ensureSupabase() {
     if (!supabase)
         throw new Error('Supabase client not initialized');
@@ -16,15 +51,26 @@ async function writeAudit(action, targetType, targetId) {
     // Audit logs are stored in Supabase, logged via database trigger or separate table
     console.log('[AUDIT]', { actor: activeUserId, action, targetType, targetId });
 }
+function mapNotificationRow(row) {
+    return {
+        id: row.id,
+        userId: row.user_id,
+        title: row.title,
+        message: row.message,
+        type: row.type,
+        read: row.read,
+        createdAt: row.created_at,
+    };
+}
 async function requireUser() {
     if (!activeUserId)
         throw new AuthorizationError('Authentication required');
     ensureSupabase();
-    const { data, error } = await supabase
+    const { data, error } = await withRetry(() => supabase
         .from('profiles')
         .select('*')
         .eq('id', activeUserId)
-        .single();
+        .single());
     if (error || !data)
         throw new AuthorizationError('Authentication required');
     return { id: data.id, name: data.name, email: data.email, role: data.role, status: data.status, createdAt: data.created_at };
@@ -57,18 +103,102 @@ export function subscribeCommunicationEvents(listener) {
         commListeners.delete(listener);
     };
 }
+export function subscribeToActiveCalls(onUpdate) {
+    if (supabase) {
+        const channel = supabase
+            .channel(`calls:${activeUserId || 'anon'}:${Date.now()}`)
+            .on('postgres_changes', {
+            event: '*',
+            schema: 'public',
+            table: 'calls',
+        }, (payload) => {
+            onUpdate({
+                type: 'call:refresh',
+                callId: payload.new?.id || payload.old?.id,
+            });
+        })
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }
+    return subscribeCommunicationEvents((event) => {
+        if (event.type === 'call:update') {
+            onUpdate({ type: 'call:update', call: event.call, callId: event.call?.id });
+        }
+    });
+}
+function mapMessageRow(row, receiptRows = []) {
+    return {
+        id: row.id,
+        conversationId: row.conversation_id,
+        senderId: row.sender_id,
+        receiverId: row.receiver_id || undefined,
+        content: row.content,
+        type: row.message_type,
+        fileUrl: row.file_url || undefined,
+        mentions: row.mentions || [],
+        status: row.delivery_status,
+        seenBy: (receiptRows || [])
+            .filter((receipt) => receipt.message_id === row.id && Boolean(receipt.seen_at))
+            .map((receipt) => receipt.user_id),
+        createdAt: row.created_at,
+    };
+}
+function buildDirectMessageFilter(currentUserId, otherUserId) {
+    return `and(sender_id.eq.${currentUserId},receiver_id.eq.${otherUserId}),and(sender_id.eq.${otherUserId},receiver_id.eq.${currentUserId})`;
+}
+export function subscribeToConversationMessages(conversationId, onMessage) {
+    if (!conversationId) {
+        return () => { };
+    }
+    if (supabase) {
+        const channel = supabase
+            .channel(`messages:${conversationId}:${activeUserId || 'anon'}:${Date.now()}`)
+            .on('postgres_changes', {
+            event: 'INSERT',
+            schema: 'public',
+            table: 'messages',
+            filter: `conversation_id=eq.${conversationId}`,
+        }, (payload) => {
+            const row = payload.new;
+            if (!row || !row.id)
+                return;
+            const mapped = mapMessageRow(row, []);
+            onMessage(mapped);
+            emitCommunicationEvent({ type: 'message:new', conversationId, message: mapped });
+            emitCommunicationEvent({ type: 'conversation:update', conversationId });
+        })
+            .subscribe();
+        return () => {
+            supabase.removeChannel(channel);
+        };
+    }
+    const unsubscribe = subscribeCommunicationEvents((event) => {
+        if (event.type === 'message:new' && event.conversationId === conversationId) {
+            onMessage(event.message);
+        }
+    });
+    return unsubscribe;
+}
 function createNotification(userId, title, message, type) {
-    const nextNotification = {
-        id: `n${Date.now()}${Math.random().toString(16).slice(2, 6)}`,
-        userId,
-        title,
-        message,
-        type,
-        read: false,
-    }]).select().single();
-    if (error)
-        throw error;
-    return data;
+    ensureSupabase();
+    return supabase
+        .from('notifications')
+        .insert([{
+            user_id: userId,
+            title,
+            message,
+            type,
+            read: false,
+        }])
+        .select()
+        .single()
+        .then(({ data, error }) => {
+        if (error)
+            throw error;
+        return mapNotificationRow(data);
+    });
 }
 async function findUserByMention(mentionName) {
     ensureSupabase();
@@ -312,7 +442,7 @@ export async function deleteUser(id) {
 export async function getProjects() {
     await requireUser();
     ensureSupabase();
-    const { data, error } = await supabase.from('projects').select('*');
+    const { data, error } = await withRetry(() => supabase.from('projects').select('*'));
     if (error)
         throw error;
     return data.map(p => ({ id: p.id, title: p.title, description: p.description, createdBy: p.created_by, createdAt: p.created_at, deadline: p.deadline, priority: p.priority, assignedUsers: [] }));
@@ -494,7 +624,7 @@ export async function assignProjectMembers(projectId, userIds) {
 export async function getTeams() {
     await requireUser();
     ensureSupabase();
-    const { data, error } = await supabase.from('teams').select('*');
+    const { data, error } = await withRetry(() => supabase.from('teams').select('*'));
     if (error)
         throw error;
     return data.map(t => ({ id: t.id, name: t.name, description: t.description, createdBy: t.created_by, members: [], projects: [], createdAt: t.created_at }));
@@ -551,7 +681,7 @@ export async function getTasks() {
     if (actor.role === 'TEAM_MEMBER') {
         query = query.eq('assigned_to', actor.id);
     }
-    const { data, error } = await query;
+    const { data, error } = await withRetry(() => query);
     if (error || !data)
         throw error || new Error('Failed to fetch tasks');
     return data.map(t => ({ id: t.id, title: t.title, description: t.description, projectId: t.project_id, assignedTo: t.assigned_to, createdBy: t.created_by, status: t.status, priority: t.priority, dueDate: t.due_date, comments: [], createdAt: t.created_at }));
@@ -727,26 +857,26 @@ export async function markAllNotificationsRead(userId) {
 export async function getConversations() {
     const actor = await requirePermission('chat:view');
     ensureSupabase();
-    const { data: membershipRows, error: membershipError } = await supabase
+    const { data: membershipRows, error: membershipError } = await withRetry(() => supabase
         .from('conversation_members')
         .select('conversation_id')
-        .eq('user_id', actor.id);
+        .eq('user_id', actor.id));
     if (membershipError)
         throw membershipError;
     const conversationIds = (membershipRows || []).map((row) => row.conversation_id);
     if (conversationIds.length === 0)
         return [];
-    const { data: conversationRows, error: conversationError } = await supabase
+    const { data: conversationRows, error: conversationError } = await withRetry(() => supabase
         .from('conversations')
         .select('*')
         .in('id', conversationIds)
-        .order('last_message_at', { ascending: false });
+        .order('last_message_at', { ascending: false }));
     if (conversationError)
         throw conversationError;
-    const { data: participantRows } = await supabase
+    const { data: participantRows } = await withRetry(() => supabase
         .from('conversation_members')
         .select('conversation_id,user_id')
-        .in('conversation_id', conversationIds);
+        .in('conversation_id', conversationIds));
     return (conversationRows || []).map((row) => ({
         id: row.id,
         type: row.type,
@@ -941,7 +1071,7 @@ export async function getConversationMessages(conversationId) {
                     .order('created_at', { ascending: true });
             }
 
-            let { data: messageRows, error: messageError } = await messageQuery;
+            let { data: messageRows, error: messageError } = await withRetry(() => messageQuery);
             if (messageError && conversationRow?.type === 'direct' && otherParticipantId) {
                 const retry = await supabase
                     .from('messages')
@@ -955,7 +1085,7 @@ export async function getConversationMessages(conversationId) {
                 throw messageError;
             const messageIds = (messageRows || []).map((row) => row.id);
             const { data: receiptRows } = messageIds.length
-                ? await supabase.from('message_receipts').select('message_id,user_id,seen_at').in('message_id', messageIds)
+                ? await withRetry(() => supabase.from('message_receipts').select('message_id,user_id,seen_at').in('message_id', messageIds))
                 : { data: [] };
             return (messageRows || []).map((row) => mapMessageRow(row, receiptRows || []));
         }
@@ -1003,7 +1133,7 @@ export async function sendMessage(input) {
             if (!content && !input.fileUrl)
                 throw new Error('Message cannot be empty');
             const mentions = extractMentionUserIds(content).filter((id) => id !== actor.id);
-            const { data: insertedMessage, error: insertMessageError } = await supabase
+            const { data: insertedMessage, error: insertMessageError } = await withRetry(() => supabase
                 .from('messages')
                 .insert([
                 {
@@ -1017,13 +1147,13 @@ export async function sendMessage(input) {
                 },
             ])
                 .select()
-                .single();
+                .single());
             if (insertMessageError)
                 throw insertMessageError;
-            await supabase.from('conversations').update({ last_message_at: insertedMessage.created_at }).eq('id', input.conversationId);
-            await supabase.from('message_receipts').upsert([
+            await withRetry(() => supabase.from('conversations').update({ last_message_at: insertedMessage.created_at }).eq('id', input.conversationId));
+            await withRetry(() => supabase.from('message_receipts').upsert([
                 { message_id: insertedMessage.id, user_id: actor.id, delivered_at: insertedMessage.created_at, seen_at: insertedMessage.created_at },
-            ]);
+            ]));
             participants
                 .filter((participantId) => participantId !== actor.id)
                 .forEach((participantId) => {
@@ -1138,23 +1268,23 @@ export async function getActiveCalls() {
     const actor = await requireUser();
     if (supabase) {
         try {
-            const { data: membershipRows } = await supabase
+            const { data: membershipRows } = await withRetry(() => supabase
                 .from('conversation_members')
                 .select('conversation_id')
-                .eq('user_id', actor.id);
+                .eq('user_id', actor.id));
             const conversationIds = (membershipRows || []).map((row) => row.conversation_id);
             if (conversationIds.length === 0)
                 return [];
-            const { data: callRows } = await supabase
+            const { data: callRows } = await withRetry(() => supabase
                 .from('calls')
                 .select('*')
                 .in('conversation_id', conversationIds)
                 .in('status', ['ringing', 'ongoing'])
-                .order('started_at', { ascending: false });
-            const { data: participantRows } = await supabase
+                .order('started_at', { ascending: false }));
+            const { data: participantRows } = await withRetry(() => supabase
                 .from('conversation_members')
                 .select('conversation_id,user_id')
-                .in('conversation_id', conversationIds);
+                .in('conversation_id', conversationIds));
             return (callRows || []).map((row) => ({
                 id: row.id,
                 conversationId: row.conversation_id,
@@ -1182,17 +1312,17 @@ export async function startCall(conversationId, type) {
         throw new AuthorizationError('Only PROJECT_MANAGER and ADMIN can initiate calls');
     }
     ensureSupabase();
-    const { data: conversationRow } = await supabase
+    const { data: conversationRow } = await withRetry(() => supabase
         .from('conversations')
         .select('*')
         .eq('id', conversationId)
-        .single();
+        .single());
     if (!conversationRow)
         throw new Error('Conversation not found');
-    const { data: membershipRows } = await supabase
+    const { data: membershipRows } = await withRetry(() => supabase
         .from('conversation_members')
         .select('user_id')
-        .eq('conversation_id', conversationId);
+        .eq('conversation_id', conversationId));
     const participants = (membershipRows || []).map((row) => row.user_id);
     const conversation = {
         id: conversationRow.id,
@@ -1207,7 +1337,7 @@ export async function startCall(conversationId, type) {
     };
     if (!canAccessConversation(actor, conversation))
         throw new AuthorizationError('Forbidden');
-    const { data: insertedCall, error: insertCallError } = await supabase
+    const { data: insertedCall, error: insertCallError } = await withRetry(() => supabase
         .from('calls')
         .insert([
         {
@@ -1218,12 +1348,12 @@ export async function startCall(conversationId, type) {
         },
     ])
         .select()
-        .single();
+        .single());
     if (insertCallError)
         throw insertCallError;
-    await supabase
+    await withRetry(() => supabase
         .from('call_participants')
-        .upsert(participants.map((participantId) => ({ call_id: insertedCall.id, user_id: participantId })));
+        .upsert(participants.map((participantId) => ({ call_id: insertedCall.id, user_id: participantId }))));
     await Promise.all(participants
         .filter((participantId) => participantId !== actor.id)
         .map((participantId) => createNotification(participantId, 'Incoming call', `${actor.name} started a ${type} call`, 'call')));
@@ -1244,31 +1374,31 @@ export async function joinCall(callId) {
     const actor = await requirePermission('calls:join');
     if (supabase) {
         try {
-            const { data: currentRow, error: currentError } = await supabase
+            const { data: currentRow, error: currentError } = await withRetry(() => supabase
                 .from('calls')
                 .select('*')
                 .eq('id', callId)
-                .single();
+                .single());
             if (currentError || !currentRow)
                 throw new Error('Call not found');
-            const { data: participantRows } = await supabase
+            const { data: participantRows } = await withRetry(() => supabase
                 .from('conversation_members')
                 .select('user_id')
-                .eq('conversation_id', currentRow.conversation_id);
+                .eq('conversation_id', currentRow.conversation_id));
             const participants = (participantRows || []).map((row) => row.user_id);
             if (!participants.includes(actor.id))
                 throw new AuthorizationError('Forbidden');
-            const { data: updatedRow, error: updateError } = await supabase
+            const { data: updatedRow, error: updateError } = await withRetry(() => supabase
                 .from('calls')
                 .update({ status: 'ongoing' })
                 .eq('id', callId)
                 .select()
-                .single();
+                .single());
             if (updateError)
                 throw updateError;
-            await supabase
+            await withRetry(() => supabase
                 .from('call_participants')
-                .upsert([{ call_id: callId, user_id: actor.id, joined_at: new Date().toISOString() }]);
+                .upsert([{ call_id: callId, user_id: actor.id, joined_at: new Date().toISOString() }]));
             const mapped = {
                 id: updatedRow.id,
                 conversationId: updatedRow.conversation_id,
@@ -1290,22 +1420,22 @@ export async function joinCall(callId) {
 export async function endCall(callId) {
     const actor = await requireUser();
     ensureSupabase();
-    const { data: currentRow } = await supabase.from('calls').select('*').eq('id', callId).single();
+    const { data: currentRow } = await withRetry(() => supabase.from('calls').select('*').eq('id', callId).single());
     if (!currentRow)
         return;
-    const { data: participantRows } = await supabase
+    const { data: participantRows } = await withRetry(() => supabase
         .from('conversation_members')
         .select('user_id')
-        .eq('conversation_id', currentRow.conversation_id);
+        .eq('conversation_id', currentRow.conversation_id));
     const participants = (participantRows || []).map((row) => row.user_id);
     if (!participants.includes(actor.id) && actor.role !== 'ADMIN')
         throw new AuthorizationError('Forbidden');
-    const { data: updatedRow, error: updateError } = await supabase
+    const { data: updatedRow, error: updateError } = await withRetry(() => supabase
         .from('calls')
         .update({ status: 'ended', ended_at: new Date().toISOString() })
         .eq('id', callId)
         .select()
-        .single();
+        .single());
     if (updateError)
         throw updateError;
     emitCommunicationEvent({

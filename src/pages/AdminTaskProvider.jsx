@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,7 +25,7 @@ export default function AdminTaskProvider() {
     const [priority, setPriority] = useState('medium');
     const [deadline, setDeadline] = useState('');
     const [assignee, setAssignee] = useState('');
-    const load = async () => {
+    const load = useCallback(async () => {
         try {
             const usersData = await api.getUsers();
             setUsers(usersData);
@@ -40,10 +40,10 @@ export default function AdminTaskProvider() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
+      }, [toast]);
     useEffect(() => {
         load();
-    }, []);
+      }, [load]);
     const projectIdsByUser = useMemo(() => {
         const map = {};
         for (const p of projects) {

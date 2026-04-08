@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -16,8 +16,10 @@ export default function UsersPage() {
     const [search, setSearch] = useState('');
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editing, setEditing] = useState(null);
+    const [isLoading, setIsLoading] = useState(true);
     const { toast } = useToast();
-    const load = async () => {
+    const load = useCallback(async () => {
+      setIsLoading(true);
         try {
             const usersData = await api.getUsers();
             setUsers(usersData);
@@ -25,8 +27,11 @@ export default function UsersPage() {
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
-    };
-    useEffect(() => { load(); }, []);
+        finally {
+          setIsLoading(false);
+        }
+      }, [toast]);
+      useEffect(() => { load(); }, [load]);
     const filtered = users.filter(u => u.name.toLowerCase().includes(search.toLowerCase()) || u.email.toLowerCase().includes(search.toLowerCase()));
     const toggleStatus = async (u) => {
         const newStatus = u.status === 'active' ? 'inactive' : 'active';
@@ -83,6 +88,9 @@ export default function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
+            {isLoading && (<TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">Loading users...</TableCell>
+              </TableRow>)}
             {filtered.map(u => (<TableRow key={u.id}>
                 <TableCell className="font-medium">{u.name}</TableCell>
                 <TableCell className="text-muted-foreground">{u.email}</TableCell>
@@ -99,6 +107,9 @@ export default function UsersPage() {
                   <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(u.id)}><Trash2 className="h-4 w-4"/></Button>
                 </TableCell>
               </TableRow>))}
+            {!isLoading && filtered.length === 0 && (<TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">No users found.</TableCell>
+              </TableRow>)}
           </TableBody>
         </Table>
       </div>
