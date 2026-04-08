@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +15,7 @@ import { useToast } from '@/hooks/use-toast';
 import { extractErrorMessage } from '@/lib/rbac';
 export default function Projects() {
     const { role, can, user } = useAuth();
+    const navigate = useNavigate();
     const [projects, setProjects] = useState([]);
     const [users, setUsers] = useState([]);
     const [search, setSearch] = useState('');
@@ -86,7 +88,7 @@ export default function Projects() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-        {filtered.map(p => (<Card key={p.id} className="hover:shadow-md transition-shadow">
+        {filtered.map(p => (<Card key={p.id} className="hover:shadow-md transition-shadow cursor-pointer hover:border-primary/50" onClick={() => navigate(`/projects/${p.id}`)}>
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <CardTitle className="text-base">{p.title}</CardTitle>
@@ -106,7 +108,7 @@ export default function Projects() {
             })}
                 {p.assignedUsers.length > 3 && <Badge variant="secondary" className="text-[10px]">+{p.assignedUsers.length - 3}</Badge>}
               </div>
-              {(can('projects:update') || can('projects:delete')) && (<div className="flex gap-2 pt-2 border-t">
+              {(can('projects:update') || can('projects:delete')) && (<div className="flex gap-2 pt-2 border-t" onClick={e => e.stopPropagation()}>
                   {can('projects:update') && (<Button variant="ghost" size="sm" className="gap-1" onClick={() => { setEditing(p); setDialogOpen(true); }}><Pencil className="h-3 w-3"/>Edit</Button>)}
                   {can('projects:delete') && (<Button variant="ghost" size="sm" className="gap-1 text-destructive hover:text-destructive" onClick={() => handleDelete(p.id)}><Trash2 className="h-3 w-3"/>Delete</Button>)}
                 </div>)}
@@ -116,13 +118,15 @@ export default function Projects() {
     </div>);
 }
 function ProjectForm({ users, project, onSave }) {
-    const { user } = useAuth();
+    const { user, can } = useAuth();
     const [title, setTitle] = useState(project?.title || '');
     const [description, setDescription] = useState(project?.description || '');
     const [priority, setPriority] = useState(project?.priority || 'medium');
     const [deadline, setDeadline] = useState(project?.deadline?.split('T')[0] || '');
+    const [manager, setManager] = useState(project?.manager || '');
     const [assigned, setAssigned] = useState(project?.assignedUsers || []);
     const [errors, setErrors] = useState({});
+    const [isLoading, setIsLoading] = useState(false);
     const { toast } = useToast();
     const toggle = (id) => setAssigned(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
     const handleSubmit = async (e) => {
@@ -132,24 +136,41 @@ function ProjectForm({ users, project, onSave }) {
             nextErrors.title = 'Project title is required';
         if (!deadline)
             nextErrors.deadline = 'Deadline is required';
+        if (!manager && can('projects:create'))
+            nextErrors.manager = 'Project manager is required';
         setErrors(nextErrors);
         if (Object.keys(nextErrors).length > 0)
             return;
+        setIsLoading(true);
         try {
             if (project) {
-                await api.updateProject(project.id, { title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned });
-                toast({ title: 'Project updated' });
+                await api.updateProject(project.id, { title, description, priority, deadline: new Date(deadline).toISOString() });
+                if (manager)
+                    await api.assignProjectManager(project.id, manager);
+                if (assigned.length > 0)
+                    await api.assignProjectMembers(project.id, assigned);
+                toast({ title: 'Project updated successfully' });
             }
             else {
-                await api.createProject({ title, description, priority, deadline: new Date(deadline).toISOString(), assignedUsers: assigned, createdBy: user.id });
-                toast({ title: 'Project created' });
+                const newProject = await api.createProject({ title, description, priority, deadline: new Date(deadline).toISOString(), createdBy: user.id });
+                if (manager)
+                    await api.assignProjectManager(newProject.id, manager);
+                if (assigned.length > 0)
+                    await api.assignProjectMembers(newProject.id, assigned);
+                toast({ title: 'Project created with members assigned' });
             }
             onSave();
         }
         catch (error) {
             toast({ title: extractErrorMessage(error), variant: 'destructive' });
         }
+        finally {
+            setIsLoading(false);
+        }
     };
+    const activeUsers = users.filter(u => u.status === 'active');
+    const managers = activeUsers.filter(u => ['PROJECT_MANAGER', 'ADMIN'].includes(u.role));
+    const teamMembers = activeUsers.filter(u => u.role === 'TEAM_MEMBER');
     return (<form onSubmit={handleSubmit} className="space-y-4">
       <FloatingInput label="Project Title" value={title} onChange={e => setTitle(e.target.value)} error={errors.title}/>
       <FloatingTextarea label="Description" value={description} onChange={e => setDescription(e.target.value)}/>
@@ -165,15 +186,26 @@ function ProjectForm({ users, project, onSave }) {
           {errors.deadline ? <p className="text-xs text-destructive">{errors.deadline}</p> : null}
         </div>
       </div>
+      {can('projects:create') && (<div className="space-y-2">
+        <Select value={manager} onValueChange={v => setManager(v)}>
+          <SelectTrigger className="h-11 rounded-xl">
+            <SelectValue placeholder="Select Project Manager"/>
+          </SelectTrigger>
+          <SelectContent>
+            {managers.map(u => (<SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>))}
+          </SelectContent>
+        </Select>
+        {errors.manager ? <p className="text-xs text-destructive">{errors.manager}</p> : null}
+      </div>)}
       <div className="space-y-2">
-        <p className="text-sm text-muted-foreground">Assign Members</p>
-        <div className="flex flex-wrap gap-2">
-          {users.filter(u => u.role === 'TEAM_MEMBER' && u.status === 'active').map(u => (<Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>
+        <p className="text-sm text-muted-foreground">Assign Team Members</p>
+        <div className="flex flex-wrap gap-2 max-h-40 overflow-y-auto">
+          {teamMembers.map(u => (<Badge key={u.id} variant={assigned.includes(u.id) ? 'default' : 'outline'} className="cursor-pointer" onClick={() => toggle(u.id)}>
               {u.name}
             </Badge>))}
         </div>
       </div>
-      <Button type="submit" className="w-full">{project ? 'Update' : 'Create'} Project</Button>
+      <Button type="submit" disabled={isLoading} className="w-full">{isLoading ? 'Processing...' : (project ? 'Update' : 'Create')} Project</Button>
     </form>);
 }
 

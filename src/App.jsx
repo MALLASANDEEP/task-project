@@ -11,6 +11,7 @@ import RegisterPage from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import Analytics from "./pages/Analytics";
 import Projects from "./pages/Projects";
+import ProjectDetail from "./pages/ProjectDetail";
 import Teams from "./pages/Teams";
 import Tasks from "./pages/Tasks";
 import Messages from "./pages/Messages";
@@ -34,6 +35,7 @@ const App = () => (<QueryClientProvider client={queryClient}>
               <Route path="/dashboard" element={<Dashboard />}/>
               <Route path="/analytics" element={<Analytics />}/>
               <Route path="/projects" element={<Projects />}/>
+              <Route path="/projects/:projectId" element={<ProjectDetail />}/>
               <Route path="/teams" element={<ProtectedRoute requiredPermission="teams:manage"><Teams /></ProtectedRoute>}/>
               <Route path="/tasks" element={<Tasks />}/>
               <Route path="/messages" element={<ProtectedRoute requiredPermission="chat:view"><Messages /></ProtectedRoute>}/>
