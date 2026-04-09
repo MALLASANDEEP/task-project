@@ -2588,7 +2588,7 @@ function formatDeployment(deployment) {
 // Project Submissions
 // =====================================================
 
-export async function submitProject(projectId, submissionNotes) {
+export async function submitProject(projectId, submissionNotes, submissionDetails = {}) {
     const actor = await requirePermission('projects:submit');
     ensureSupabase();
 
@@ -2609,6 +2609,13 @@ export async function submitProject(projectId, submissionNotes) {
             submitted_by: actor.id,
             status: 'pending',
             submission_notes: submissionNotes,
+            project_link: submissionDetails.projectLink || null,
+            completion_summary: submissionDetails.completionSummary || null,
+            completion_checklist: submissionDetails.completionChecklist || null,
+            deliverables: submissionDetails.deliverables || null,
+            next_steps: submissionDetails.nextSteps || null,
+            project_documentation: submissionDetails.projectDocumentation || null,
+            documentation_file_name: submissionDetails.documentationFileName || null,
         }])
         .select()
         .single();
