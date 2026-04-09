@@ -1,0 +1,217 @@
+/* Message & Calls Hub Styles */
+
+@keyframes tabSlide {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes badgePulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.7;
+  }
+}
+
+/* Tab navigation background */
+.message-calls-nav {
+  background: linear-gradient(135deg, var(--background) 0%, var(--muted) 100%);
+  transition: all 0.3s ease;
+}
+
+/* Tab list styling */
+.message-calls-tabs {
+  gap: 0.5rem;
+  padding: 0.25rem;
+  background: var(--muted);
+  border-radius: 0.5rem;
+}
+
+/* Individual tab trigger */
+.message-calls-trigger {
+  position: relative;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-weight: 500;
+  color: var(--muted-foreground);
+}
+
+.message-calls-trigger:hover {
+  background-color: var(--muted-foreground)/10;
+  color: var(--foreground);
+}
+
+.message-calls-trigger[data-state='active'] {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: 0 2px 6px rgba(var(--primary-rgb, 0, 0, 0), 0.2);
+}
+
+/* Tab badge counter */
+.message-calls-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.25rem;
+  border-radius: 0.9999rem;
+  background-color: rgba(var(--primary-rgb, 0, 0, 0), 0.2);
+  color: var(--primary);
+  font-size: 0.75rem;
+  font-weight: 700;
+  animation: badgePulse 2s ease-in-out infinite;
+}
+
+.message-calls-trigger[data-state='active'] .message-calls-badge {
+  background-color: rgba(255, 255, 255, 0.25);
+  color: var(--primary-foreground);
+}
+
+/* Missed calls indicator */
+.message-calls-missed-badge {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 9999px;
+  background-color: var(--destructive);
+  color: white;
+  font-size: 0.625rem;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Tab content animation */
+.message-calls-content {
+  animation: tabSlide 0.2s ease-out;
+}
+
+/* Icon styling */
+.message-calls-icon {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+/* Divider styling */
+.message-calls-divider {
+  border-color: var(--border);
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
+.message-calls-trigger:hover ~ .message-calls-divider {
+  opacity: 0.7;
+}
+
+/* Container transitions */
+.message-calls-container {
+  transition: all 0.3s ease;
+}
+
+/* Dark mode optimizations */
+@media (prefers-color-scheme: dark) {
+  .message-calls-badge {
+    background-color: rgba(255, 255, 255, 0.1);
+    color: var(--primary);
+  }
+
+  .message-calls-trigger {
+    color: var(--muted-foreground);
+  }
+
+  .message-calls-trigger:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+  }
+
+  .message-calls-trigger[data-state='active'] {
+    box-shadow: 0 2px 8px rgba(var(--primary-rgb, 0, 0, 0), 0.3);
+  }
+}
+
+/* Responsive design */
+@media (max-width: 640px) {
+  .message-calls-trigger {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.875rem;
+  }
+
+  .message-calls-badge {
+    min-width: 1.125rem;
+    height: 1.125rem;
+    font-size: 0.625rem;
+  }
+}
+
+/* Loading state */
+.message-calls-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+}
+
+.message-calls-loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Empty state */
+.message-calls-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  padding: 2rem;
+  text-align: center;
+}
+
+.message-calls-empty-icon {
+  opacity: 0.5;
+  margin-bottom: 1rem;
+}
+
+.message-calls-empty-text {
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+}
+
+/* Smooth scrolling */
+.message-calls-scroll {
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Focus management */
+.message-calls-trigger:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* Active indication line */
+.message-calls-trigger[data-state='active']::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background-color: var(--primary);
+  border-radius: 1px;
+}

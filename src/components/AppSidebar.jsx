@@ -2,7 +2,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { NavLink } from '@/components/NavLink';
 import { useLocation } from 'react-router-dom';
 import { Sidebar, SidebarContent, SidebarGroup, SidebarGroupContent, SidebarGroupLabel, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarFooter, useSidebar, } from '@/components/ui/sidebar';
-import { LayoutDashboard, FolderKanban, ListChecks, Users, Settings, Layers, LogOut, BarChart3, BriefcaseBusiness, MessagesSquare, } from 'lucide-react';
+import { LayoutDashboard, FolderKanban, ListChecks, Users, Settings, Layers, LogOut, BarChart3, BriefcaseBusiness, MessagesSquare, Package, } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { roleLabel } from '@/lib/rbac';
 const coreMenuItems = [
@@ -10,6 +10,7 @@ const coreMenuItems = [
     { title: 'Projects', url: '/projects', icon: FolderKanban, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
     { title: 'Tasks', url: '/tasks', icon: ListChecks, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
     { title: 'Messages & Calls', url: '/messages', icon: MessagesSquare, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
+    { title: 'Deployments', url: '/deployments', icon: Package, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
     { title: 'Analytics', url: '/analytics', icon: BarChart3, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
     { title: 'Settings', url: '/settings', icon: Settings, roles: ['ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER'] },
 ];
@@ -17,6 +18,7 @@ const adminMenuItems = [
     { title: 'Users', url: '/users', icon: Users, roles: ['ADMIN'] },
     { title: 'Teams', url: '/teams', icon: Users, roles: ['ADMIN'] },
     { title: 'Task Provider', url: '/admin-provider', icon: BriefcaseBusiness, roles: ['ADMIN', 'PROJECT_MANAGER'] },
+    { title: 'Project Submissions', url: '/project-submissions', icon: Package, roles: ['ADMIN', 'PROJECT_MANAGER'] },
 ];
 export function AppSidebar() {
     const { user, hasRole, logout } = useAuth();

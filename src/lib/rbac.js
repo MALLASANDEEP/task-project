@@ -6,15 +6,14 @@ export const ROLES = {
 };
 
 const legacyToAppRole = {
-    TEAM_MEMBER: ROLES.TEAM_LEADER,
     VIEWER: ROLES.TEAM_MEMBER,
 };
 
 const appToDbRole = {
     [ROLES.ADMIN]: 'ADMIN',
     [ROLES.PROJECT_MANAGER]: 'PROJECT_MANAGER',
-    [ROLES.TEAM_LEADER]: 'TEAM_MEMBER',
-    [ROLES.TEAM_MEMBER]: 'VIEWER',
+    [ROLES.TEAM_LEADER]: 'TEAM_LEADER',
+    [ROLES.TEAM_MEMBER]: 'TEAM_MEMBER',
 };
 
 export function normalizeRole(role) {
@@ -34,6 +33,9 @@ const rolePermissions = {
         'projects:create',
         'projects:update',
         'projects:delete',
+        'projects:submit',
+        'projects:approve',
+        'projects:view',
         'tasks:create',
         'tasks:update',
         'tasks:delete',
@@ -49,6 +51,10 @@ const rolePermissions = {
         'reports:view',
         'dashboard:view',
         'teams:manage',
+        'deployments:create',
+        'deployments:approve',
+        'deployments:deploy',
+        'deployments:view',
     ],
     PROJECT_MANAGER: [
         'tasks:create',
@@ -56,6 +62,9 @@ const rolePermissions = {
         'tasks:delete',
         'tasks:assign',
         'tasks:view',
+        'projects:view',
+        'projects:submit',
+        'projects:approve',
         'comments:add',
         'chat:view',
         'chat:send',
@@ -64,6 +73,10 @@ const rolePermissions = {
         'calls:join',
         'reports:view',
         'dashboard:view',
+        'deployments:create',
+        'deployments:approve',
+        'deployments:deploy',
+        'deployments:view',
     ],
     TEAM_LEADER: [
         'tasks:update-own-status',
@@ -71,14 +84,25 @@ const rolePermissions = {
         'comments:add',
         'chat:view',
         'chat:send',
+        'calls:initiate',
         'calls:join',
         'dashboard:view',
+        'projects:view',
+        'projects:submit',
+        'deployments:create',
+        'deployments:view',
     ],
     TEAM_MEMBER: [
         'tasks:view',
         'reports:view',
         'chat:view',
+        'chat:send',
+        'calls:join',
         'dashboard:view',
+        'projects:view',
+        'projects:submit',
+        'deployments:create',
+        'deployments:view',
     ],
 };
 export function hasPermission(role, permission) {

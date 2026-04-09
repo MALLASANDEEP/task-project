@@ -9,6 +9,7 @@ import http from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import crypto from 'node:crypto';
 import { createClient } from '@supabase/supabase-js';
 
 dotenv.config();
@@ -475,6 +476,332 @@ io.to(`user:${callSession.initiatorId}`).emit('call:ended', {
   });
 
   // ─────────────────────────────────────────────────────────────────
+  // KANBAN BOARD - REAL-TIME TASK EVENTS
+  // ─────────────────────────────────────────────────────────────────
+
+  socket.on('task:join-board', (projectId, userId) => {
+    console.log(`📌 User ${userId} joined task board for project ${projectId}`);
+    socket.join(`project:${projectId}:tasks`);
+    
+    // Notify others that user is viewing the board
+    socket.to(`project:${projectId}:tasks`).emit('task:user-viewing', {
+      userId,
+      projectId,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  socket.on('task:leave-board', (projectId, userId) => {
+    console.log(`📌 User ${userId} left task board for project ${projectId}`);
+    socket.leave(`project:${projectId}:tasks`);
+    
+    socket.to(`project:${projectId}:tasks`).emit('task:user-left', {
+      userId,
+      projectId,
+      timestamp: new Date().toISOString(),
+    });
+  });
+
+  socket.on('task:created', async (payload) => {
+    try {
+      const { taskId, projectId, userId, task } = payload;
+      
+      console.log(`✨ Task created: ${taskId} in project ${projectId}`);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'created',
+        entity_type: 'task',
+        entity_id: taskId,
+        new_value: {
+          title: task.title,
+          description: task.description,
+          status: task.status,
+          priority: task.priority,
+        },
+        metadata: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast to all users viewing this project's board
+      io.to(`project:${projectId}:tasks`).emit('task:created', {
+        taskId,
+        projectId,
+        userId,
+        task,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Create notification for assignee
+      if (task.assigned_to) {
+        await supabase.from('notifications').insert({
+          user_id: task.assigned_to,
+          title: 'Task Assigned',
+          message: `${task.created_by_name || 'Someone'} created and assigned: "${task.title}"`,
+          type: 'task_assigned',
+          task_id: taskId,
+          action_type: 'assigned',
+          read: false,
+        });
+
+        io.to(`user:${task.assigned_to}`).emit('notification:new', {
+          type: 'task_assigned',
+          taskId,
+          message: `Task assigned: ${task.title}`,
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error handling task:created:', error);
+    }
+  });
+
+  socket.on('task:moved', async (payload) => {
+    try {
+      const { taskId, projectId, userId, fromStatus, toStatus } = payload;
+      
+      console.log(`🔄 Task ${taskId} moved from ${fromStatus} to ${toStatus}`);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'moved',
+        entity_type: 'task',
+        entity_id: taskId,
+        old_value: { status: fromStatus },
+        new_value: { status: toStatus },
+        metadata: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast status change to all viewers
+      io.to(`project:${projectId}:tasks`).emit('task:updated', {
+        taskId,
+        projectId,
+        userId,
+        status: toStatus,
+        changes: {
+          status: { from: fromStatus, to: toStatus },
+        },
+        timestamp: new Date().toISOString(),
+      });
+
+      // Notify watchers
+      const { data: assignments } = await supabase
+        .from('task_assignments')
+        .select('assigned_to')
+        .eq('task_id', taskId);
+
+      if (assignments && assignments.length > 0) {
+        assignments.forEach(async (assignment) => {
+          if (assignment.assigned_to !== userId) {
+            await supabase.from('notifications').insert({
+              user_id: assignment.assigned_to,
+              title: 'Task Status Updated',
+              message: `Task moved to ${toStatus}`,
+              type: 'task_status_changed',
+              task_id: taskId,
+              action_type: 'status_changed',
+              read: false,
+            });
+
+            io.to(`user:${assignment.assigned_to}`).emit('notification:new', {
+              type: 'task_status_changed',
+              taskId,
+              status: toStatus,
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error handling task:moved:', error);
+    }
+  });
+
+  socket.on('task:updated', async (payload) => {
+    try {
+      const { taskId, projectId, userId, oldValues, newValues } = payload;
+      
+      console.log(`✏️ Task ${taskId} updated in project ${projectId}`);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'updated',
+        entity_type: 'task',
+        entity_id: taskId,
+        old_value: oldValues,
+        new_value: newValues,
+        metadata: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast changes
+      io.to(`project:${projectId}:tasks`).emit('task:updated', {
+        taskId,
+        projectId,
+        userId,
+        changes: {
+          old: oldValues,
+          new: newValues,
+        },
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('❌ Error handling task:updated:', error);
+    }
+  });
+
+  socket.on('task:comment', async (payload) => {
+    try {
+      const { taskId, projectId, userId, commentId, content } = payload;
+      
+      console.log(`💬 Comment added to task ${taskId}`);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'commented',
+        entity_type: 'comment',
+        entity_id: commentId,
+        new_value: { content },
+        metadata: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast comment
+      io.to(`project:${projectId}:tasks`).emit('task:comment-added', {
+        taskId,
+        projectId,
+        userId,
+        commentId,
+        content,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Notify watchers
+      const { data: assignments } = await supabase
+        .from('task_assignments')
+        .select('assigned_to')
+        .eq('task_id', taskId);
+
+      if (assignments && assignments.length > 0) {
+        assignments.forEach(async (assignment) => {
+          if (assignment.assigned_to !== userId) {
+            await supabase.from('notifications').insert({
+              user_id: assignment.assigned_to,
+              title: 'New Comment',
+              message: `New comment: "${content.substring(0, 50)}..."`,
+              type: 'task_commented',
+              task_id: taskId,
+              action_type: 'commented',
+              read: false,
+            });
+
+            io.to(`user:${assignment.assigned_to}`).emit('notification:new', {
+              type: 'task_commented',
+              taskId,
+              content,
+            });
+          }
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error handling task:comment:', error);
+    }
+  });
+
+  socket.on('task:assigned', async (payload) => {
+    try {
+      const { taskId, projectId, userId, assignedTo, assignedBy } = payload;
+      
+      console.log(`👤 Task ${taskId} assigned to ${assignedTo}`);
+
+      // Log activity (treated as multi-assignment)
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'assigned',
+        entity_type: 'assignment',
+        entity_id: taskId,
+        new_value: { assigned_to: assignedTo },
+        metadata: {
+          assignedBy,
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast assignment
+      io.to(`project:${projectId}:tasks`).emit('task:assigned', {
+        taskId,
+        projectId,
+        assignedTo,
+        assignedBy,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Notify the newly assigned user
+      if (assignedTo !== userId) {
+        await supabase.from('notifications').insert({
+          user_id: assignedTo,
+          title: 'Task Assigned To You',
+          message: `You have been assigned a new task`,
+          type: 'task_assigned',
+          task_id: taskId,
+          action_type: 'assigned',
+          read: false,
+        });
+
+        io.to(`user:${assignedTo}`).emit('notification:new', {
+          type: 'task_assigned',
+          taskId,
+          message: 'You have been assigned a task',
+        });
+      }
+    } catch (error) {
+      console.error('❌ Error handling task:assigned:', error);
+    }
+  });
+
+  socket.on('task:deleted', async (payload) => {
+    try {
+      const { taskId, projectId, userId } = payload;
+      
+      console.log(`🗑️ Task ${taskId} deleted from project ${projectId}`);
+
+      // Log activity
+      await supabase.from('activity_logs').insert({
+        user_id: userId,
+        task_id: taskId,
+        action: 'deleted',
+        entity_type: 'task',
+        entity_id: taskId,
+        metadata: {
+          timestamp: new Date().toISOString(),
+        },
+      });
+
+      // Broadcast deletion
+      io.to(`project:${projectId}:tasks`).emit('task:deleted', {
+        taskId,
+        projectId,
+        userId,
+        timestamp: new Date().toISOString(),
+      });
+    } catch (error) {
+      console.error('❌ Error handling task:deleted:', error);
+    }
+  });
+
+  // ─────────────────────────────────────────────────────────────────
   // DISCONNECTION & CLEANUP
   // ─────────────────────────────────────────────────────────────────
 
@@ -559,7 +886,7 @@ app.post('/api/messages/sync', async (req, res) => {
 // Server Startup
 // ════════════════════════════════════════════════════════════════════
 
-const PORT = process.env.SOCKET_PORT || 3001;
+const PORT = process.env.SOCKET_PORT || 8001;
 
 server.listen(PORT, () => {
   console.log(`

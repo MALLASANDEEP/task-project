@@ -1,0 +1,189 @@
+/* Call History Tab Styles */
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* Smooth transitions for call items */
+.call-history-item {
+  transition: all 0.2s ease-in-out;
+}
+
+.call-history-item:hover {
+  transform: translateX(2px);
+}
+
+/* Expanded call details animation */
+.call-details-expanded {
+  animation: slideDown 0.2s ease-out;
+}
+
+/* Status badges */
+.call-status-badge {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.call-status-completed {
+  background-color: var(--color-success-light, #10b981);
+  color: white;
+}
+
+.call-status-missed {
+  background-color: var(--color-danger-light, #ef4444);
+  color: white;
+}
+
+.call-status-rejected {
+  background-color: var(--color-warning-light, #f97316);
+  color: white;
+}
+
+/* Call type icons */
+.call-type-video {
+  background-color: rgba(59, 130, 246, 0.1);
+  color: #3b82f6;
+}
+
+.call-type-audio {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+
+/* Hover effects for call rows */
+.call-row {
+  transition: background-color 0.2s ease, border-color 0.2s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.call-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.1),
+    transparent
+  );
+  transition: left 0.5s ease;
+  pointer-events: none;
+}
+
+.call-row:hover::before {
+  left: 100%;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .call-actions {
+    gap: 0.25rem;
+  }
+
+  .call-duration-text {
+    font-size: 0.75rem;
+  }
+
+  .call-participant-text {
+    max-width: 150px;
+  }
+}
+
+/* Smooth scroll for call history */
+.call-history-scroll {
+  scroll-behavior: smooth;
+}
+
+/* Loading spinner */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.call-loading-spinner {
+  animation: spin 1s linear infinite;
+}
+
+/* Empty state styling */
+.call-history-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted-foreground);
+}
+
+.call-history-empty-icon {
+  opacity: 0.5;
+  margin-bottom: 0.75rem;
+}
+
+/* Group header styling */
+.call-group-header {
+  position: sticky;
+  top: 0;
+  background-color: rgba(var(--card-rgb, 255), 255, 255);
+  backdrop-filter: blur(4px);
+  z-index: 10;
+  padding: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+/* Badge styling */
+.call-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+/* Dark mode adjustments */
+@media (prefers-color-scheme: dark) {
+  .call-type-video {
+    background-color: rgba(59, 130, 246, 0.2);
+  }
+
+  .call-type-audio {
+    background-color: rgba(16, 185, 129, 0.2);
+  }
+
+  .call-row::before {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.05),
+      transparent
+    );
+  }
+}

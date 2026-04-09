@@ -11,6 +11,8 @@ import { ArrowLeft, Plus, Users, Calendar } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { extractErrorMessage, roleLabel } from '@/lib/rbac';
 import { PriorityBadge, StatusBadge } from '@/pages/Dashboard';
+import ProjectSubmitButton from '@/components/project/ProjectSubmitButton';
+import ProjectSubmitModal from '@/components/project/ProjectSubmitModal';
 import * as api from '@/services/api';
 
 export default function ProjectDetail() {
@@ -75,14 +77,17 @@ export default function ProjectDetail() {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center gap-2">
-                <Button variant="ghost" size="icon" onClick={() => navigate('/projects')}>
-                    <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div>
-                    <h1 className="text-2xl font-bold">{project.title}</h1>
-                    <p className="text-sm text-muted-foreground">{project.description}</p>
+            <div className="flex items-center gap-2 justify-between">
+                <div className="flex items-center gap-2">
+                    <Button variant="ghost" size="icon" onClick={() => navigate('/projects')}>
+                        <ArrowLeft className="h-4 w-4" />
+                    </Button>
+                    <div>
+                        <h1 className="text-2xl font-bold">{project.title}</h1>
+                        <p className="text-sm text-muted-foreground">{project.description}</p>
+                    </div>
                 </div>
+                <ProjectSubmitButton projectId={projectId} />
             </div>
 
             <div className="grid grid-cols-1 gap-6 md:grid-cols-3">

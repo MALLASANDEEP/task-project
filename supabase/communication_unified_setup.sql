@@ -102,7 +102,7 @@ alter table public.message_receipts enable row level security;
 alter table public.calls enable row level security;
 alter table public.call_participants enable row level security;
 
--- Conversations: members can read, direct chats can be created by non-viewers,
+-- Conversations: members can read, direct chats can be created by non-team-members,
 -- project/team chats stay admin/PM-only.
 drop policy if exists conversations_select_members on public.conversations;
 create policy conversations_select_members on public.conversations
@@ -130,7 +130,7 @@ for insert with check (
     type = 'direct'
     and exists (
       select 1 from public.profiles p
-      where p.id = auth.uid() and p.role <> 'VIEWER'
+      where p.id = auth.uid() and p.role <> 'TEAM_MEMBER'
     )
   )
   or (
@@ -198,12 +198,13 @@ for select using (
 );
 
 drop policy if exists messages_insert_non_viewer on public.messages;
-create policy messages_insert_non_viewer on public.messages
+drop policy if exists messages_insert_non_team_member on public.messages;
+create policy messages_insert_non_team_member on public.messages
 for insert with check (
   sender_id = auth.uid()
   and exists (
     select 1 from public.profiles p
-    where p.id = auth.uid() and p.role <> 'VIEWER'
+    where p.id = auth.uid() and p.role <> 'TEAM_MEMBER'
   )
   and exists (
     select 1

@@ -54,6 +54,14 @@ export default function CallsPage() {
       load();
       const unsubscribe = api.subscribeToActiveCalls(async (event) => {
         const latestCalls = await load();
+        if (event.type === 'call:update' && !event.call && event.callId) {
+          setSelectedCall((prev) => {
+            if (!prev || prev.id !== event.callId)
+              return latestCalls.find((call) => call.id === event.callId) || prev;
+            return latestCalls.find((call) => call.id === event.callId) || prev;
+          });
+          return;
+        }
         if (event.type === 'call:update' && event.call) {
           setSelectedCall(event.call.status === 'ended' ? null : event.call);
           return;
@@ -89,6 +97,8 @@ export default function CallsPage() {
         return title.includes(query);
       });
     }, [callHistory, conversations, searchQuery, user?.id, usersById]);
+    const incomingActiveCalls = useMemo(() => activeCalls.filter((call) => call.initiatedBy !== user?.id), [activeCalls, user?.id]);
+    const outgoingActiveCalls = useMemo(() => activeCalls.filter((call) => call.initiatedBy === user?.id), [activeCalls, user?.id]);
     const startCall = async (type) => {
         if (!selectedConversationId)
             return;
@@ -230,15 +240,30 @@ export default function CallsPage() {
           </div>
 
           <div className="space-y-3">
-            {activeCalls.length > 0 && (<Card className="border-[#2a3942] bg-[#111b21]">
+            {incomingActiveCalls.length > 0 && (<Card className="border-[#2a3942] bg-[#111b21]">
                 <CardHeader>
-                  <CardTitle className="text-sm text-[#e9edef]">Incoming / Active Calls</CardTitle>
+                  <CardTitle className="text-sm text-[#e9edef]">Incoming Calls</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-2">
-                  {activeCalls.map((call) => (<button key={call.id} onClick={() => setSelectedCall(call)} className="flex w-full items-center justify-between rounded-lg border border-[#2a3942] bg-[#0b141a] p-2 text-left">
+                  {incomingActiveCalls.map((call) => (<button key={call.id} onClick={() => setSelectedCall(call)} className="flex w-full items-center justify-between rounded-lg border border-[#2a3942] bg-[#0b141a] p-2 text-left">
                       <div>
                         <p className="text-sm font-medium capitalize text-[#e9edef]">{call.type} call</p>
-                        <p className="text-xs text-[#8696a0]">{call.participants.length} participants</p>
+                        <p className="text-xs text-[#8696a0]">Incoming • {call.participants.length} participants</p>
+                      </div>
+                      <Badge variant="outline" className="capitalize">{call.status}</Badge>
+                    </button>))}
+                </CardContent>
+              </Card>)}
+
+            {outgoingActiveCalls.length > 0 && (<Card className="border-[#2a3942] bg-[#111b21]">
+                <CardHeader>
+                  <CardTitle className="text-sm text-[#e9edef]">Outgoing Calls</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {outgoingActiveCalls.map((call) => (<button key={call.id} onClick={() => setSelectedCall(call)} className="flex w-full items-center justify-between rounded-lg border border-[#2a3942] bg-[#0b141a] p-2 text-left">
+                      <div>
+                        <p className="text-sm font-medium capitalize text-[#e9edef]">{call.type} call</p>
+                        <p className="text-xs text-[#8696a0]">Outgoing • {call.participants.length} participants</p>
                       </div>
                       <Badge variant="outline" className="capitalize">{call.status}</Badge>
                     </button>))}
@@ -265,7 +290,7 @@ export default function CallsPage() {
                   <div>
                     <p className="font-medium capitalize text-[#e9edef]">{call.type} call • {conversation?.title || conversation?.type || 'Conversation'}</p>
                     <p className="mt-1 text-xs text-[#8696a0]">
-                      Participants: {call.participants.length} • Started {new Date(call.startedAt).toLocaleString()}
+                      {call.initiatedBy === user?.id ? 'Outgoing' : 'Incoming'} • Participants: {call.participants.length} • Started {new Date(call.startedAt).toLocaleString()}
                     </p>
                   </div>
                   <Badge variant="outline" className="capitalize">{call.status}</Badge>
@@ -292,7 +317,7 @@ export default function CallsPage() {
         </CardContent>
       </Card>
 
-      <CallModal open={!!selectedCall} call={selectedCall} canJoin={can('calls:join') && selectedCall?.participants.includes(user.id) === true} onJoin={joinSelectedCall} onEnd={endSelectedCall} currentUserId={user.id}/>
+      <CallModal open={!!selectedCall} call={selectedCall} canJoin={can('calls:join')} onJoin={joinSelectedCall} onEnd={endSelectedCall} currentUserId={user.id}/>
     </div>);
 }
 

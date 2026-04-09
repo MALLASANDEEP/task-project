@@ -9,7 +9,7 @@ create extension if not exists pgcrypto;
 -- =====================================================
 do $$
 begin
-  create type public.user_role as enum ('ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER');
+  create type public.user_role as enum ('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER');
 exception
   when duplicate_object then null;
 end $$;
@@ -35,6 +35,41 @@ exception
   when duplicate_object then null;
 end $$;
 
+do $$
+begin
+  create type public.deployment_status as enum ('pending', 'approved', 'rejected', 'deployed', 'failed', 'reverted');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  create type public.deployment_environment as enum ('staging', 'test', 'preview', 'production');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  create type public.deployment_action as enum ('created', 'approved', 'rejected', 'deployed', 'reverted');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  create type public.project_status as enum ('draft', 'in_progress', 'submitted', 'completed', 'archived');
+exception
+  when duplicate_object then null;
+end $$;
+
+do $$
+begin
+  create type public.submission_status as enum ('pending', 'approved', 'rejected');
+exception
+  when duplicate_object then null;
+end $$;
+
 -- =====================================================
 -- Core tables
 -- =====================================================
@@ -55,6 +90,8 @@ create table if not exists public.projects (
   created_by uuid not null references public.profiles (id) on delete restrict,
   deadline timestamptz not null,
   priority public.priority_level not null default 'medium',
+  project_status public.project_status not null default 'in_progress',
+  completion_date timestamptz,
   created_at timestamptz not null default now()
 );
 
@@ -118,12 +155,75 @@ create table if not exists public.notifications (
   created_at timestamptz not null default now()
 );
 
+-- =====================================================
+-- Deployment tables
+-- =====================================================
+create table if not exists public.deployments (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects (id) on delete cascade,
+  requested_by uuid not null references public.profiles (id) on delete restrict,
+  approved_by uuid references public.profiles (id) on delete set null,
+  environment public.deployment_environment not null,
+  status public.deployment_status not null default 'pending',
+  description text not null,
+  notes_rejection text,
+  deployment_link text,
+  change_notes text,
+  pre_deployment_checklist text,
+  post_deployment_instructions text,
+  expected_downtime text,
+  requested_at timestamptz not null default now(),
+  approved_at timestamptz,
+  deployed_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists public.deployment_items (
+  id uuid primary key default gen_random_uuid(),
+  deployment_id uuid not null references public.deployments (id) on delete cascade,
+  task_id uuid not null references public.tasks (id) on delete cascade,
+  included_at timestamptz not null default now()
+);
+
+create table if not exists public.deployment_logs (
+  id uuid primary key default gen_random_uuid(),
+  deployment_id uuid not null references public.deployments (id) on delete cascade,
+  action public.deployment_action not null,
+  user_id uuid not null references public.profiles (id) on delete restrict,
+  message text not null,
+  timestamp timestamptz not null default now()
+);
+
+-- =====================================================
+-- Project Submissions
+-- =====================================================
+create table if not exists public.project_submissions (
+  id uuid primary key default gen_random_uuid(),
+  project_id uuid not null references public.projects (id) on delete cascade,
+  submitted_by uuid not null references public.profiles (id) on delete restrict,
+  approved_by uuid references public.profiles (id) on delete set null,
+  status public.submission_status not null default 'pending',
+  submission_notes text not null,
+  rejection_reason text,
+  submitted_at timestamptz not null default now(),
+  approved_at timestamptz,
+  created_at timestamptz not null default now()
+);
+
 create index if not exists idx_project_members_user_id on public.project_members (user_id);
 create index if not exists idx_team_members_user_id on public.team_members (user_id);
 create index if not exists idx_team_projects_project_id on public.team_projects (project_id);
 create index if not exists idx_tasks_project_id on public.tasks (project_id);
 create index if not exists idx_tasks_assigned_to on public.tasks (assigned_to);
 create index if not exists idx_comments_task_id on public.comments (task_id);
+create index if not exists idx_deployments_project_id on public.deployments (project_id);
+create index if not exists idx_deployments_requested_by on public.deployments (requested_by);
+create index if not exists idx_deployments_status on public.deployments (status);
+create index if not exists idx_deployment_items_deployment_id on public.deployment_items (deployment_id);
+create index if not exists idx_deployment_logs_deployment_id on public.deployment_logs (deployment_id);
+create index if not exists idx_project_submissions_project_id on public.project_submissions (project_id);
+create index if not exists idx_project_submissions_status on public.project_submissions (status);
+create index if not exists idx_project_submissions_submitted_by on public.project_submissions (submitted_by);
 
 -- =====================================================
 -- Helpers and triggers
@@ -159,8 +259,9 @@ begin
       case upper(coalesce(new.raw_user_meta_data ->> 'role', ''))
         when 'ADMIN' then 'ADMIN'::public.user_role
         when 'PROJECT_MANAGER' then 'PROJECT_MANAGER'::public.user_role
+        when 'TEAM_LEADER' then 'TEAM_LEADER'::public.user_role
         when 'TEAM_MEMBER' then 'TEAM_MEMBER'::public.user_role
-        when 'VIEWER' then 'VIEWER'::public.user_role
+        when 'VIEWER' then 'TEAM_MEMBER'::public.user_role
         else null
       end,
       'TEAM_MEMBER'::public.user_role
@@ -217,6 +318,13 @@ alter table public.team_projects enable row level security;
 alter table public.tasks enable row level security;
 alter table public.comments enable row level security;
 alter table public.notifications enable row level security;
+alter table public.deployments enable row level security;
+alter table public.deployment_items enable row level security;
+alter table public.deployment_logs enable row level security;
+alter table public.project_submissions enable row level security;
+alter table public.deployments enable row level security;
+alter table public.deployment_items enable row level security;
+alter table public.deployment_logs enable row level security;
 
 -- Profiles
 
@@ -473,6 +581,112 @@ create policy "notifications_delete_admin_or_owner"
   for delete
   using (user_id = auth.uid() or public.is_admin());
 
+-- Deployments
+
+drop policy if exists "deployments_select_all_authenticated" on public.deployments;
+create policy "deployments_select_all_authenticated"
+  on public.deployments
+  for select
+  using (auth.uid() is not null);
+
+drop policy if exists "deployments_insert_authenticated" on public.deployments;
+create policy "deployments_insert_authenticated"
+  on public.deployments
+  for insert
+  with check (auth.uid() is not null and requested_by = auth.uid());
+
+drop policy if exists "deployments_update_admin_pm_only" on public.deployments;
+create policy "deployments_update_admin_pm_only"
+  on public.deployments
+  for update
+  using (
+    public.is_admin() or
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'PROJECT_MANAGER'
+    )
+  )
+  with check (
+    public.is_admin() or
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'PROJECT_MANAGER'
+    )
+  );
+
+drop policy if exists "deployments_delete_admin_only" on public.deployments;
+create policy "deployments_delete_admin_only"
+  on public.deployments
+  for delete
+  using (public.is_admin());
+
+-- Deployment Items
+
+drop policy if exists "deployment_items_select_all_authenticated" on public.deployment_items;
+create policy "deployment_items_select_all_authenticated"
+  on public.deployment_items
+  for select
+  using (auth.uid() is not null);
+
+drop policy if exists "deployment_items_insert_authenticated" on public.deployment_items;
+create policy "deployment_items_insert_authenticated"
+  on public.deployment_items
+  for insert
+  with check (auth.uid() is not null);
+
+drop policy if exists "deployment_items_delete_admin_only" on public.deployment_items;
+create policy "deployment_items_delete_admin_only"
+  on public.deployment_items
+  for delete
+  using (public.is_admin());
+
+-- Deployment Logs
+
+drop policy if exists "deployment_logs_select_all_authenticated" on public.deployment_logs;
+create policy "deployment_logs_select_all_authenticated"
+  on public.deployment_logs
+  for select
+  using (auth.uid() is not null);
+
+drop policy if exists "deployment_logs_insert_authenticated" on public.deployment_logs;
+create policy "deployment_logs_insert_authenticated"
+  on public.deployment_logs
+  for insert
+  with check (auth.uid() is not null);
+
+-- Project Submissions
+
+drop policy if exists "project_submissions_select_all" on public.project_submissions;
+create policy "project_submissions_select_all"
+  on public.project_submissions
+  for select
+  using (auth.uid() is not null);
+
+drop policy if exists "project_submissions_insert_authenticated" on public.project_submissions;
+create policy "project_submissions_insert_authenticated"
+  on public.project_submissions
+  for insert
+  with check (auth.uid() is not null);
+
+drop policy if exists "project_submissions_update_pm_admin_only" on public.project_submissions;
+create policy "project_submissions_update_pm_admin_only"
+  on public.project_submissions
+  for update
+  using (
+    public.is_admin() or
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'PROJECT_MANAGER'
+    )
+  )
+  with check (
+    public.is_admin() or
+    exists (
+      select 1 from public.profiles
+      where id = auth.uid() and role = 'PROJECT_MANAGER'
+    )
+  );
+
 -- =====================================================
 -- Seed auth users
 -- =====================================================
@@ -521,7 +735,7 @@ values
     crypt('user123', gen_salt('bf')),
     now(),
     jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
-    jsonb_build_object('name', 'Rohan Mehta', 'role', 'TEAM_MEMBER', 'avatar_url', ''),
+    jsonb_build_object('name', 'Rohan Mehta', 'role', 'TEAM_LEADER', 'avatar_url', ''),
     now(),
     now()
   ),
@@ -533,7 +747,7 @@ values
     crypt('user123', gen_salt('bf')),
     now(),
     jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
-    jsonb_build_object('name', 'Sneha Gupta', 'role', 'VIEWER', 'avatar_url', ''),
+    jsonb_build_object('name', 'Sneha Gupta', 'role', 'TEAM_MEMBER', 'avatar_url', ''),
     now(),
     now()
   )
@@ -545,6 +759,27 @@ set
   raw_app_meta_data = excluded.raw_app_meta_data,
   raw_user_meta_data = excluded.raw_user_meta_data,
   updated_at = now();
+
+-- =====================================================
+-- Seed demo profiles (matching auth users)
+-- =====================================================
+-- Temporarily disable the trigger to allow seed data
+alter table public.profiles disable trigger enforce_profile_privileges;
+
+insert into public.profiles (id, name, email, role, status, created_at)
+values
+  ('11111111-1111-1111-1111-111111111111', 'Aarav Sharma', 'admin@taskflow.io', 'ADMIN', 'active', now()),
+  ('22222222-2222-2222-2222-222222222222', 'Priya Patel', 'priya@taskflow.io', 'PROJECT_MANAGER', 'active', now()),
+  ('33333333-3333-3333-3333-333333333333', 'Rohan Mehta', 'rohan@taskflow.io', 'TEAM_LEADER', 'active', now()),
+  ('44444444-4444-4444-4444-444444444444', 'Sneha Gupta', 'sneha@taskflow.io', 'TEAM_MEMBER', 'active', now())
+on conflict (id) do update
+set name = excluded.name,
+    email = excluded.email,
+    role = excluded.role,
+    status = excluded.status;
+
+-- Re-enable the trigger
+alter table public.profiles enable trigger enforce_profile_privileges;
 
 -- =====================================================
 -- Seed demo app data
@@ -634,3 +869,4 @@ set title = excluded.title,
     read = excluded.read,
     type = excluded.type,
     created_at = excluded.created_at;
+

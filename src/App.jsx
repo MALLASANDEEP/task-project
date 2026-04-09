@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { AppLayout } from "@/components/AppLayout";
+import { NotificationListener } from "@/components/NotificationListener";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
@@ -17,6 +18,8 @@ import Tasks from "./pages/Tasks";
 import Messages from "./pages/Messages";
 import UsersManagement from "./pages/UsersManagement";
 import AdminTaskProvider from "./pages/AdminTaskProvider";
+import Deployments from "./pages/Deployments";
+import ProjectSubmissions from "./pages/ProjectSubmissions";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
 const queryClient = new QueryClient();
@@ -26,6 +29,7 @@ const App = () => (<QueryClientProvider client={queryClient}>
       <Sonner />
       <AuthProvider>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <NotificationListener />
           <Routes>
             <Route path="/" element={<Navigate to="/dashboard" replace/>}/>
             <Route path="/login" element={<LoginPage />}/>
@@ -38,6 +42,8 @@ const App = () => (<QueryClientProvider client={queryClient}>
               <Route path="/teams" element={<ProtectedRoute requiredPermission="teams:manage"><Teams /></ProtectedRoute>}/>
               <Route path="/tasks" element={<Tasks />}/>
               <Route path="/messages" element={<ProtectedRoute requiredPermission="chat:view"><Messages /></ProtectedRoute>}/>
+              <Route path="/deployments" element={<ProtectedRoute requiredPermission="deployments:view"><Deployments /></ProtectedRoute>}/>
+              <Route path="/project-submissions" element={<ProtectedRoute requiredPermission="projects:view"><ProjectSubmissions /></ProtectedRoute>}/>
               <Route path="/users" element={<ProtectedRoute requiredPermission="users:manage"><UsersManagement /></ProtectedRoute>}/>
               <Route path="/admin-provider" element={<ProtectedRoute requiredPermission="projects:create"><AdminTaskProvider /></ProtectedRoute>}/>
               <Route path="/settings" element={<Settings />}/>

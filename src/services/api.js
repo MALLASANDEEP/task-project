@@ -4,8 +4,8 @@
  */
 import { supabase } from '@/lib/supabase';
 import { AuthorizationError, hasPermission, normalizeRole, toDbRole } from '@/lib/rbac';
+import { socketManager } from '@/lib/socketManager';
 let activeUserId = null;
-let viewerRoleSupported = false;
 const CALLS_ENABLED = import.meta.env.VITE_ENABLE_CALLS !== 'false';
 let typingStates = [];
 let projects = [];
@@ -85,29 +85,19 @@ function mapNotificationRow(row) {
         type: row.type,
         read: row.read,
         createdAt: row.created_at,
+        linkPath: row.link_path || undefined,
     };
-}
-function isInvalidRoleValueError(error) {
-    const code = String(error?.code || '').toLowerCase();
-    const message = String(error?.message || '').toLowerCase();
-    return code === '22p02' || (message.includes('invalid input value') && message.includes('enum'));
 }
 function mapRoleFromDb(role) {
     if (!role)
         return role;
+    // Keep VIEWER compatibility for any stale records from older schemas.
     if (role === 'VIEWER')
         return 'TEAM_MEMBER';
-    // Only convert TEAM_MEMBER to TEAM_LEADER if we've confirmed VIEWER is supported
-    // (this means TEAM_MEMBER is old data from when TEAM_LEADER was stored as TEAM_MEMBER)
-    if (role === 'TEAM_MEMBER' && viewerRoleSupported === true)
-        return 'TEAM_LEADER';
     return role;
 }
 function mapRoleToDb(role) {
     const normalized = normalizeRole(role);
-    if (normalized === 'TEAM_MEMBER' && !viewerRoleSupported) {
-        return 'TEAM_MEMBER';
-    }
     return toDbRole(normalized);
 }
 function mapProfileRow(profile) {
@@ -155,6 +145,32 @@ const commListeners = new Set();
 function emitCommunicationEvent(event) {
     commListeners.forEach((listener) => listener(event));
 }
+let socketCallBridgeRegistered = false;
+function registerSocketCallBridge() {
+    if (socketCallBridgeRegistered)
+        return;
+    socketCallBridgeRegistered = true;
+    const forwardCallUpdate = (status) => (data) => emitCommunicationEvent({
+        type: 'call:update',
+        callId: data?.callId,
+        call: data?.callId
+            ? {
+                id: data.callId,
+                status,
+                type: data.type || data.callType || 'audio',
+                participants: data.participants || [],
+                initiatedBy: data.initiatorId || data.acceptedBy || data.endedBy || null,
+                conversationId: data.conversationId,
+            }
+            : null,
+    });
+    socketManager.on('call:ringing', forwardCallUpdate('ringing'));
+    socketManager.on('call:start', forwardCallUpdate('ongoing'));
+    socketManager.on('call:accepted', forwardCallUpdate('ongoing'));
+    socketManager.on('call:rejected', forwardCallUpdate('ended'));
+    socketManager.on('call:ended', forwardCallUpdate('ended'));
+}
+registerSocketCallBridge();
 export function subscribeCommunicationEvents(listener) {
     commListeners.add(listener);
     return () => {
@@ -301,7 +317,7 @@ export function subscribeToConversationMessages(conversationId, onMessage) {
     });
     return unsubscribe;
 }
-function createNotification(userId, title, message, type) {
+function createNotification(userId, title, message, type, options = {}) {
     ensureSupabase();
     return supabase
         .from('notifications')
@@ -311,6 +327,7 @@ function createNotification(userId, title, message, type) {
             message,
             type,
             read: false,
+            link_path: options.linkPath || null,
         }])
         .select()
         .single()
@@ -434,26 +451,7 @@ export async function register(name, email, password) {
                 }])
                 .select()
                 .single();
-            if (insertError && isInvalidRoleValueError(insertError)) {
-                viewerRoleSupported = false;
-                const retryInsert = await supabase
-                    .from('profiles')
-                    .insert([{
-                    id: data.user.id,
-                    name,
-                    email,
-                    role: 'TEAM_MEMBER',
-                    status: 'active'
-                }])
-                    .select()
-                    .single();
-                if (retryInsert.error) {
-                    console.error('[REGISTER] Profile creation error:', retryInsert.error.message);
-                    return null;
-                }
-                profile = retryInsert.data;
-            }
-            else if (insertError) {
+            if (insertError) {
                 console.error('[REGISTER] Profile creation error:', insertError.message);
                 return null;
             }
@@ -505,10 +503,6 @@ export async function getUsers() {
     const { data, error } = await supabase.from('profiles').select('*');
     if (error)
         throw error;
-    // Detect if VIEWER enum is supported by checking if any profiles have VIEWER role
-    if (data && data.some(p => p.role === 'VIEWER')) {
-        viewerRoleSupported = true;
-    }
     return data.map((p) => mapProfileRow(p));
 }
 export async function getUserById(id) {
@@ -528,24 +522,6 @@ export async function createUser(data) {
         .insert([{ name: data.name, email: data.email, role: mapRoleToDb(data.role), status: data.status }])
         .select()
         .single();
-    
-    // Retry fallback for TEAM_MEMBER role if initial create fails
-    if (error && normalizeRole(data.role) === 'TEAM_MEMBER') {
-        console.log('[TEAM_MEMBER_CREATE_FALLBACK] Initial create failed, retrying with TEAM_MEMBER', { error: error?.message });
-        viewerRoleSupported = false;
-        const retry = await supabase
-            .from('profiles')
-            .insert([{ name: data.name, email: data.email, role: 'TEAM_MEMBER', status: data.status }])
-            .select()
-            .single();
-        if (retry.data) {
-            console.log('[TEAM_MEMBER_CREATE_FALLBACK] Retry succeeded');
-            await writeAudit('CREATE_USER', 'user', retry.data.id);
-            return mapProfileRow(retry.data);
-        } else if (retry.error) {
-            throw retry.error;
-        }
-    }
     if (error)
         throw error;
     await writeAudit('CREATE_USER', 'user', newProfile.id);
@@ -567,26 +543,7 @@ export async function updateUser(id, data) {
         throw new AuthorizationError('Forbidden');
     }
     const updateData = { ...(data.name && { name: data.name }), ...(data.role && { role: mapRoleToDb(data.role) }), ...(data.status && { status: data.status }) };
-    let { data: updated, error } = await supabase.from('profiles').update(updateData).eq('id', id).select().single();
-    
-    // Retry fallback for TEAM_MEMBER role updates if initial attempt fails
-    if (error && typeof data.role !== 'undefined' && normalizeRole(data.role) === 'TEAM_MEMBER') {
-        console.log('[TEAM_MEMBER_UPDATE_FALLBACK] Initial update failed, retrying with TEAM_MEMBER', { error: error?.message });
-        viewerRoleSupported = false;
-        const retry = await supabase
-            .from('profiles')
-            .update({ ...updateData, role: 'TEAM_MEMBER' })
-            .eq('id', id)
-            .select()
-            .single();
-        if (retry.data) {
-            console.log('[TEAM_MEMBER_UPDATE_FALLBACK] Retry succeeded');
-            updated = retry.data;
-            error = null; // Clear error on successful retry
-        } else {
-            error = retry.error; // Keep original error if fallback also fails
-        }
-    }
+    const { data: updated, error } = await supabase.from('profiles').update(updateData).eq('id', id).select().single();
     if (error)
         throw error;
     await writeAudit('UPDATE_USER', 'user', id);
@@ -1128,7 +1085,7 @@ export async function getNotificationsForUser(userId) {
     const { data, error } = await supabase.from('notifications').select('*').eq('user_id', userId);
     if (error || !data)
         throw error;
-    return data.map(n => ({ id: n.id, userId: n.user_id, title: n.title, message: n.message, read: n.read, type: n.type, createdAt: n.created_at }));
+    return data.map(n => ({ id: n.id, userId: n.user_id, title: n.title, message: n.message, read: n.read, type: n.type, createdAt: n.created_at, linkPath: n.link_path || undefined }));
 }
 export async function markNotificationRead(id) {
     const actor = await requireUser();
@@ -1407,20 +1364,21 @@ export async function getConversationMessages(conversationId) {
         .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
 }
 export async function sendMessage(input) {
+    const normalizedInput = typeof input === 'string' ? { content: input } : (input || {});
     const actor = await requirePermission('chat:send');
     if (supabase) {
         try {
             const { data: conversationRow } = await supabase
                 .from('conversations')
                 .select('*')
-                .eq('id', input.conversationId)
+                .eq('id', normalizedInput.conversationId)
                 .single();
             if (!conversationRow)
                 throw new Error('Conversation not found');
             const { data: membershipRows } = await supabase
                 .from('conversation_members')
                 .select('user_id')
-                .eq('conversation_id', input.conversationId);
+                .eq('conversation_id', normalizedInput.conversationId);
             const participants = (membershipRows || []).map((row) => row.user_id);
             const conversation = {
                 id: conversationRow.id,
@@ -1435,19 +1393,19 @@ export async function sendMessage(input) {
             };
             if (!canSendMessage(actor, conversation))
                 throw new AuthorizationError('Forbidden');
-            const content = input.content.trim();
-            if (!content && !input.fileUrl)
+            const content = String(normalizedInput.content || '').trim();
+            if (!content && !normalizedInput.fileUrl)
                 throw new Error('Message cannot be empty');
             const mentions = (await extractMentionUserIds(content)).filter((id) => id !== actor.id);
             const { data: insertedMessage, error: insertMessageError } = await withRetry(() => supabase
                 .from('messages')
                 .insert([
                 {
-                    conversation_id: input.conversationId,
+                    conversation_id: normalizedInput.conversationId,
                     sender_id: actor.id,
                     content,
-                    message_type: input.type || 'text',
-                    file_url: input.fileUrl || null,
+                    message_type: normalizedInput.type || 'text',
+                    file_url: normalizedInput.fileUrl || null,
                     mentions,
                     delivery_status: 'delivered',
                 },
@@ -1456,17 +1414,21 @@ export async function sendMessage(input) {
                 .single());
             if (insertMessageError)
                 throw insertMessageError;
-            await withRetry(() => supabase.from('conversations').update({ last_message_at: insertedMessage.created_at }).eq('id', input.conversationId));
+            await withRetry(() => supabase.from('conversations').update({ last_message_at: insertedMessage.created_at }).eq('id', normalizedInput.conversationId));
             await withRetry(() => supabase.from('message_receipts').upsert([
                 { message_id: insertedMessage.id, user_id: actor.id, delivered_at: insertedMessage.created_at, seen_at: insertedMessage.created_at },
             ]));
             participants
                 .filter((participantId) => participantId !== actor.id)
                 .forEach((participantId) => {
-                createNotification(participantId, 'New message', `${actor.name}: ${content || 'sent an attachment'}`, 'message');
+                createNotification(participantId, 'New message', `${actor.name}: ${content || 'sent an attachment'}`, 'message', {
+                    linkPath: `/messages?conversation=${encodeURIComponent(normalizedInput.conversationId)}&message=${encodeURIComponent(insertedMessage.id)}`,
+                });
             });
             mentions.forEach((mentionedUserId) => {
-                createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention');
+                createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention', {
+                    linkPath: `/messages?conversation=${encodeURIComponent(normalizedInput.conversationId)}&message=${encodeURIComponent(insertedMessage.id)}`,
+                });
             });
             const mapped = {
                 id: insertedMessage.id,
@@ -1480,21 +1442,21 @@ export async function sendMessage(input) {
                 seenBy: [actor.id],
                 createdAt: insertedMessage.created_at,
             };
-            emitCommunicationEvent({ type: 'message:new', conversationId: input.conversationId, message: mapped });
-            emitCommunicationEvent({ type: 'conversation:update', conversationId: input.conversationId });
+            emitCommunicationEvent({ type: 'message:new', conversationId: normalizedInput.conversationId, message: mapped });
+            emitCommunicationEvent({ type: 'conversation:update', conversationId: normalizedInput.conversationId });
             return mapped;
         }
         catch {
             // Fall through to local mode
         }
     }
-    const conversation = conversations.find((item) => item.id === input.conversationId);
+    const conversation = conversations.find((item) => item.id === normalizedInput.conversationId);
     if (!conversation)
         throw new Error('Conversation not found');
     if (!canSendMessage(actor, conversation))
         throw new AuthorizationError('Forbidden');
-    const content = input.content.trim();
-    if (!content && !input.fileUrl)
+    const content = String(normalizedInput.content || '').trim();
+    if (!content && !normalizedInput.fileUrl)
         throw new Error('Message cannot be empty');
     const mentions = (await extractMentionUserIds(content)).filter((id) => id !== actor.id);
     const message = {
@@ -1502,8 +1464,8 @@ export async function sendMessage(input) {
         conversationId: conversation.id,
         senderId: actor.id,
         content,
-        type: input.type || 'text',
-        fileUrl: input.fileUrl,
+        type: normalizedInput.type || 'text',
+        fileUrl: normalizedInput.fileUrl,
         mentions,
         status: 'delivered',
         seenBy: [actor.id],
@@ -1516,10 +1478,14 @@ export async function sendMessage(input) {
     conversation.participants
         .filter((participantId) => participantId !== actor.id)
         .forEach((participantId) => {
-        createNotification(participantId, 'New message', `${actor.name}: ${content || 'sent an attachment'}`, 'message');
+        createNotification(participantId, 'New message', `${actor.name}: ${content || 'sent an attachment'}`, 'message', {
+            linkPath: `/messages?conversation=${encodeURIComponent(conversation.id)}&message=${encodeURIComponent(message.id)}`,
+        });
     });
     mentions.forEach((mentionedUserId) => {
-        createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention');
+        createNotification(mentionedUserId, 'You were mentioned', `${actor.name} mentioned you in chat`, 'mention', {
+            linkPath: `/messages?conversation=${encodeURIComponent(conversation.id)}&message=${encodeURIComponent(message.id)}`,
+        });
     });
     emitCommunicationEvent({ type: 'message:new', conversationId: conversation.id, message });
     emitCommunicationEvent({ type: 'conversation:update', conversationId: conversation.id });
@@ -1784,6 +1750,22 @@ export async function joinCall(callId) {
             const participants = (participantRows || []).map((row) => row.user_id);
             if (!participants.includes(actor.id))
                 throw new AuthorizationError('Forbidden');
+            if (actor.role === 'TEAM_MEMBER') {
+                const initiatorId = currentRow.initiated_by || currentRow.initiator_id;
+                if (!initiatorId) {
+                    throw new AuthorizationError('TEAM_MEMBER can only join TEAM_LEADER initiated calls');
+                }
+                const { data: initiatorProfile, error: initiatorError } = await withRetry(() => supabase
+                    .from('profiles')
+                    .select('role')
+                    .eq('id', initiatorId)
+                    .maybeSingle());
+                if (initiatorError)
+                    throw initiatorError;
+                if (normalizeRole(initiatorProfile?.role) !== 'TEAM_LEADER') {
+                    throw new AuthorizationError('TEAM_MEMBER can only join TEAM_LEADER initiated calls');
+                }
+            }
             const { data: updatedRow, error: updateError } = await withRetry(() => supabase
                 .from('calls')
                 .update({ status: 'ongoing' })
@@ -1814,9 +1796,29 @@ export async function joinCall(callId) {
             if (markCallsFeatureUnavailable(error)) {
                 throw new Error('Calls feature is not enabled in the database yet.');
             }
-            // Fall through to local mode
+            throw error;
         }
     }
+
+    const call = callSessions.find((session) => session.id === callId);
+    if (!call)
+        throw new Error('Call not found');
+    if (!call.participants.includes(actor.id))
+        throw new AuthorizationError('Forbidden');
+    if (actor.role === 'TEAM_MEMBER') {
+        const initiator = await getUserById(call.initiatedBy);
+        if (normalizeRole(initiator?.role) !== 'TEAM_LEADER') {
+            throw new AuthorizationError('TEAM_MEMBER can only join TEAM_LEADER initiated calls');
+        }
+    }
+    const updated = {
+        ...call,
+        status: 'ongoing',
+        participants: Array.from(new Set([...(call.participants || []), actor.id])),
+    };
+    callSessions = callSessions.map((session) => session.id === callId ? updated : session);
+    emitCommunicationEvent({ type: 'call:update', call: updated });
+    return updated;
 }
 export async function endCall(callId) {
     if (!CALLS_ENABLED)
@@ -2011,6 +2013,850 @@ export async function getDashboardStats() {
         totalTasks: tasks?.length || 0,
         activeUsers: activeUsers?.length || 0,
         tasksByStatus,
+    };
+}
+
+// ── Activity Logs (Real-time Task Tracking) ───────────
+export async function getActivityLogs(taskId) {
+    const actor = await requirePermission('tasks:view');
+    ensureSupabase();
+
+    let query = supabase
+        .from('activity_logs')
+        .select('*');
+
+    if (taskId) {
+        query = query.eq('task_id', taskId);
+    }
+
+    const { data, error } = await withRetry(() => 
+        query.order('created_at', { ascending: false }).limit(100)
+    );
+
+    if (error) throw error;
+
+    return (data || []).map(row => ({
+        id: row.id,
+        userId: row.user_id,
+        taskId: row.task_id,
+        action: row.action, // 'created', 'updated', 'moved', 'assigned', 'commented'
+        entityType: row.entity_type,
+        entityId: row.entity_id,
+        oldValue: row.old_value,
+        newValue: row.new_value,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+    }));
+}
+
+export async function getTaskAssignments(taskId) {
+    const actor = await requirePermission('tasks:view');
+    ensureSupabase();
+
+    const { data, error } = await withRetry(() =>
+        supabase
+            .from('task_assignments')
+            .select('*')
+            .eq('task_id', taskId)
+    );
+
+    if (error) throw error;
+
+    return (data || []).map(row => ({
+        id: row.id,
+        taskId: row.task_id,
+        assignedTo: row.assigned_to,
+        assignedBy: row.assigned_by,
+        assignedAt: row.assigned_at,
+    }));
+}
+
+export async function assignTaskToUser(taskId, assignedTo) {
+    const actor = await requirePermission('tasks:assign');
+    ensureSupabase();
+
+    const { data: task, error: taskError } = await supabase
+        .from('tasks')
+        .select('*')
+        .eq('id', taskId)
+        .single();
+
+    if (taskError || !task) throw new Error('Task not found');
+
+    // Check project membership
+    const { data: membership } = await supabase
+        .from('project_members')
+        .select('*')
+        .eq('project_id', task.project_id)
+        .eq('user_id', actor.id)
+        .single();
+
+    if (!membership && actor.role !== 'ADMIN') {
+        throw new AuthorizationError('Cannot assign tasks in this project');
+    }
+
+    // Add assignment
+    const { data: assignment, error: assignError } = await supabase
+        .from('task_assignments')
+        .insert([{
+            task_id: taskId,
+            assigned_to: assignedTo,
+            assigned_by: actor.id,
+        }])
+        .select()
+        .single();
+
+    if (assignError) throw assignError;
+
+    // Create notification
+    await createNotification(
+        assignedTo,
+        'Task Assigned',
+        `You have been assigned: "${task.title}"`,
+        'task_assigned',
+        { taskId }
+    );
+
+    // Emit real-time event
+    socketManager.emit('task:assigned', {
+        taskId,
+        projectId: task.project_id,
+        userId: actor.id,
+        assignedTo,
+        assignedBy: actor.id,
+    });
+
+    return {
+        id: assignment.id,
+        taskId: assignment.task_id,
+        assignedTo: assignment.assigned_to,
+        assignedBy: assignment.assigned_by,
+        assignedAt: assignment.assigned_at,
+    };
+}
+
+// =====================================================
+// Deployment Management
+// =====================================================
+
+export async function createDeploymentRequest(projectId, taskIds = [], environment, description, deploymentDetails = {}) {
+    const actor = await requirePermission('deployments:create');
+    ensureSupabase();
+
+    // Validate project exists
+    const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('id')
+        .eq('id', projectId)
+        .single();
+
+    if (projectError || !project) throw new Error('Project not found');
+
+    // Create deployment
+    const { data: deployment, error: deployError } = await supabase
+        .from('deployments')
+        .insert([{
+            project_id: projectId,
+            requested_by: actor.id,
+            environment,
+            status: 'pending',
+            description,
+            deployment_link: deploymentDetails.deploymentLink || null,
+            change_notes: deploymentDetails.changeNotes || null,
+            pre_deployment_checklist: deploymentDetails.preDeploymentChecklist || null,
+            post_deployment_instructions: deploymentDetails.postDeploymentInstructions || null,
+            expected_downtime: deploymentDetails.expectedDowntime || null,
+            project_documentation: deploymentDetails.projectDocumentation || null,
+            documentation_file_name: deploymentDetails.documentationFileName || null,
+        }])
+        .select()
+        .single();
+
+    if (deployError) throw deployError;
+
+    // Add deployment items (tasks)
+    if (taskIds && taskIds.length > 0) {
+        const items = taskIds.map(taskId => ({
+            deployment_id: deployment.id,
+            task_id: taskId,
+        }));
+
+        const { error: itemsError } = await supabase
+            .from('deployment_items')
+            .insert(items);
+
+        if (itemsError) throw itemsError;
+    }
+
+    // Create log entry
+    await createDeploymentLog(deployment.id, 'created', actor.id, `Deployment requested by ${actor.name}`);
+
+    // Emit real-time event
+    socketManager.emit('deployment:created', {
+        deploymentId: deployment.id,
+        projectId,
+        requestedBy: actor.id,
+        environment,
+    });
+
+    // Create notification for PM/Admin
+    const { data: pmAdmins } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .in('role', ['PROJECT_MANAGER', 'ADMIN']);
+
+    if (pmAdmins) {
+        for (const user of pmAdmins) {
+            await createNotification(
+                user.id,
+                'New Deployment Request',
+                `${actor.name} requested deployment to ${environment}`,
+                'deployment_requested',
+                { deploymentId: deployment.id }
+            );
+        }
+    }
+
+    return formatDeployment(deployment);
+}
+
+export async function getDeployments(filters = {}) {
+    const actor = await requirePermission('deployments:view');
+    ensureSupabase();
+
+    let query = supabase
+        .from('deployments')
+        .select('*');
+
+    // Filter by status if provided
+    if (filters.status) {
+        query = query.eq('status', filters.status);
+    }
+
+    // Filter by environment if provided
+    if (filters.environment) {
+        query = query.eq('environment', filters.environment);
+    }
+
+    // Role-based filtering (TEAM_LEADER/MEMBER see only their own)
+    if (actor.role !== 'ADMIN' && actor.role !== 'PROJECT_MANAGER') {
+        query = query.eq('requested_by', actor.id);
+    }
+
+    const { data, error } = await withRetry(() => query);
+
+    if (error) throw error;
+
+    return (data || []).map(formatDeployment);
+}
+
+export async function getDeploymentById(deploymentId) {
+    const actor = await requirePermission('deployments:view');
+    ensureSupabase();
+
+    const { data: deployment, error: deployError } = await supabase
+        .from('deployments')
+        .select('*')
+        .eq('id', deploymentId)
+        .single();
+
+    if (deployError) throw deployError;
+    if (!deployment) throw new Error('Deployment not found');
+
+    // Check permission
+    if (
+        actor.role !== 'ADMIN' &&
+        actor.role !== 'PROJECT_MANAGER' &&
+        deployment.requested_by !== actor.id
+    ) {
+        throw new AuthorizationError('Cannot view this deployment');
+    }
+
+    return formatDeployment(deployment);
+}
+
+export async function getDeploymentItems(deploymentId) {
+    const actor = await requirePermission('deployments:view');
+    ensureSupabase();
+
+    const { data: items, error } = await supabase
+        .from('deployment_items')
+        .select(`
+            id,
+            deployment_id,
+            task_id,
+            tasks (
+                id,
+                title,
+                status,
+                assigned_to
+            ),
+            included_at
+        `)
+        .eq('deployment_id', deploymentId);
+
+    if (error) throw error;
+
+    return (items || []).map(item => ({
+        id: item.id,
+        deploymentId: item.deployment_id,
+        taskId: item.task_id,
+        task: item.tasks ? {
+            id: item.tasks.id,
+            title: item.tasks.title,
+            status: item.tasks.status,
+            assignedTo: item.tasks.assigned_to,
+        } : null,
+        includedAt: item.included_at,
+    }));
+}
+
+export async function approveDeployment(deploymentId, notes = '') {
+    const actor = await requirePermission('deployments:approve');
+    ensureSupabase();
+
+    // Get deployment
+    const { data: deployment, error: deployError } = await supabase
+        .from('deployments')
+        .select('*')
+        .eq('id', deploymentId)
+        .single();
+
+    if (deployError || !deployment) throw new Error('Deployment not found');
+
+    if (deployment.status !== 'pending') {
+        throw new Error('Only pending deployments can be approved');
+    }
+
+    // Update deployment
+    const { data: updated, error: updateError } = await supabase
+        .from('deployments')
+        .update({
+            status: 'approved',
+            approved_by: actor.id,
+            approved_at: new Date().toISOString(),
+        })
+        .eq('id', deploymentId)
+        .select()
+        .single();
+
+    if (updateError) throw updateError;
+
+    // Create log
+    await createDeploymentLog(
+        deploymentId,
+        'approved',
+        actor.id,
+        `Approved by ${actor.name}${notes ? ': ' + notes : ''}`
+    );
+
+    // Emit event
+    socketManager.emit('deployment:approved', {
+        deploymentId,
+        approvedBy: actor.id,
+    });
+
+    // Notify requester
+    const { data: requester } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('id', deployment.requested_by)
+        .single();
+
+    if (requester) {
+        await createNotification(
+            requester.id,
+            'Deployment Approved',
+            `Your deployment request has been approved`,
+            'deployment_approved',
+            { deploymentId }
+        );
+    }
+
+    return formatDeployment(updated);
+}
+
+export async function rejectDeployment(deploymentId, reason) {
+    const actor = await requirePermission('deployments:approve');
+    ensureSupabase();
+
+    // Get deployment
+    const { data: deployment, error: deployError } = await supabase
+        .from('deployments')
+        .select('*')
+        .eq('id', deploymentId)
+        .single();
+
+    if (deployError || !deployment) throw new Error('Deployment not found');
+
+    if (deployment.status !== 'pending') {
+        throw new Error('Only pending deployments can be rejected');
+    }
+
+    // Update deployment
+    const { data: updated, error: updateError } = await supabase
+        .from('deployments')
+        .update({
+            status: 'rejected',
+            approved_by: actor.id,
+            notes_rejection: reason,
+            approved_at: new Date().toISOString(),
+        })
+        .eq('id', deploymentId)
+        .select()
+        .single();
+
+    if (updateError) throw updateError;
+
+    // Create log
+    await createDeploymentLog(
+        deploymentId,
+        'rejected',
+        actor.id,
+        `Rejected by ${actor.name}: ${reason}`
+    );
+
+    // Emit event
+    socketManager.emit('deployment:rejected', {
+        deploymentId,
+        rejectedBy: actor.id,
+        reason,
+    });
+
+    // Notify requester
+    const { data: requester } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('id', deployment.requested_by)
+        .single();
+
+    if (requester) {
+        await createNotification(
+            requester.id,
+            'Deployment Rejected',
+            `Your deployment request was rejected: ${reason}`,
+            'deployment_rejected',
+            { deploymentId }
+        );
+    }
+
+    return formatDeployment(updated);
+}
+
+export async function deployToEnvironment(deploymentId, environment) {
+    const actor = await requirePermission('deployments:deploy');
+    ensureSupabase();
+
+    // Get deployment
+    const { data: deployment, error: deployError } = await supabase
+        .from('deployments')
+        .select('*')
+        .eq('id', deploymentId)
+        .single();
+
+    if (deployError || !deployment) throw new Error('Deployment not found');
+
+    if (deployment.status !== 'approved') {
+        throw new Error('Only approved deployments can be deployed');
+    }
+
+    // Validate: Only ADMIN can deploy to production
+    if (environment === 'production' && actor.role !== 'ADMIN') {
+        throw new AuthorizationError('Only admins can deploy to production');
+    }
+
+    // Update deployment
+    const { data: updated, error: updateError } = await supabase
+        .from('deployments')
+        .update({
+            status: 'deployed',
+            environment,
+            deployed_at: new Date().toISOString(),
+        })
+        .eq('id', deploymentId)
+        .select()
+        .single();
+
+    if (updateError) throw updateError;
+
+    // Create log
+    await createDeploymentLog(
+        deploymentId,
+        'deployed',
+        actor.id,
+        `Deployed to ${environment} by ${actor.name}`
+    );
+
+    // Emit event
+    socketManager.emit('deployment:deployed', {
+        deploymentId,
+        environment,
+        deployedBy: actor.id,
+    });
+
+    // Notify requester
+    const { data: requester } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('id', deployment.requested_by)
+        .single();
+
+    if (requester) {
+        await createNotification(
+            requester.id,
+            'Deployment Complete',
+            `Your deployment to ${environment} is complete`,
+            'deployment_deployed',
+            { deploymentId }
+        );
+    }
+
+    return formatDeployment(updated);
+}
+
+export async function getDeploymentLogs(deploymentId) {
+    const actor = await requirePermission('deployments:view');
+    ensureSupabase();
+
+    const { data: logs, error } = await supabase
+        .from('deployment_logs')
+        .select(`
+            id,
+            deployment_id,
+            action,
+            user_id,
+            message,
+            timestamp,
+            profiles (
+                id,
+                name
+            )
+        `)
+        .eq('deployment_id', deploymentId)
+        .order('timestamp', { ascending: false });
+
+    if (error) throw error;
+
+    return (logs || []).map(log => ({
+        id: log.id,
+        deploymentId: log.deployment_id,
+        action: log.action,
+        userId: log.user_id,
+        userName: log.profiles?.name || 'Unknown',
+        message: log.message,
+        timestamp: log.timestamp,
+    }));
+}
+
+// =====================================================
+// Deployment Helpers
+// =====================================================
+
+async function createDeploymentLog(deploymentId, action, userId, message) {
+    ensureSupabase();
+
+    const { error } = await supabase
+        .from('deployment_logs')
+        .insert([{
+            deployment_id: deploymentId,
+            action,
+            user_id: userId,
+            message,
+        }]);
+
+    if (error) console.error('Error creating deployment log:', error);
+}
+
+function formatDeployment(deployment) {
+    return {
+        id: deployment.id,
+        projectId: deployment.project_id,
+        requestedBy: deployment.requested_by,
+        approvedBy: deployment.approved_by,
+        environment: deployment.environment,
+        status: deployment.status,
+        description: deployment.description,
+        notesRejection: deployment.notes_rejection,
+        requestedAt: deployment.requested_at,
+        approvedAt: deployment.approved_at,
+        deployedAt: deployment.deployed_at,
+        createdAt: deployment.created_at,
+    };
+}
+
+// =====================================================
+// Project Submissions
+// =====================================================
+
+export async function submitProject(projectId, submissionNotes) {
+    const actor = await requirePermission('projects:submit');
+    ensureSupabase();
+
+    // Get project
+    const { data: project, error: projectError } = await supabase
+        .from('projects')
+        .select('*')
+        .eq('id', projectId)
+        .single();
+
+    if (projectError || !project) throw new Error('Project not found');
+
+    // Create submission
+    const { data: submission, error: submissionError } = await supabase
+        .from('project_submissions')
+        .insert([{
+            project_id: projectId,
+            submitted_by: actor.id,
+            status: 'pending',
+            submission_notes: submissionNotes,
+        }])
+        .select()
+        .single();
+
+    if (submissionError) throw submissionError;
+
+    // Update project status
+    await supabase
+        .from('projects')
+        .update({ project_status: 'submitted' })
+        .eq('id', projectId);
+
+    // Notify PM/Admin
+    const { data: pmAdmins } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .in('role', ['PROJECT_MANAGER', 'ADMIN']);
+
+    if (pmAdmins) {
+        for (const user of pmAdmins) {
+            await createNotification(
+                user.id,
+                'Project Submission',
+                `${project.title} has been submitted for approval by ${actor.name}`,
+                'project_submitted',
+                { projectId, submissionId: submission.id }
+            );
+        }
+    }
+
+    // Emit socket event
+    socketManager.emit('project:submitted', {
+        projectId,
+        submissionId: submission.id,
+        submittedBy: actor.id,
+    });
+
+    return formatProjectSubmission(submission);
+}
+
+export async function getProjectSubmissions(filters = {}) {
+    const actor = await requirePermission('projects:view');
+    ensureSupabase();
+
+    let query = supabase
+        .from('project_submissions')
+        .select(`
+            id,
+            project_id,
+            submitted_by,
+            approved_by,
+            status,
+            submission_notes,
+            rejection_reason,
+            submitted_at,
+            approved_at,
+            created_at,
+            projects (id, title),
+            submitted_by: profiles!submitted_by (id, name),
+            approved_by: profiles!approved_by (id, name)
+        `);
+
+    if (filters.status) {
+        query = query.eq('status', filters.status);
+    }
+
+    if (filters.projectId) {
+        query = query.eq('project_id', filters.projectId);
+    }
+
+    const { data, error } = await withRetry(() => query);
+
+    if (error) throw error;
+
+    return (data || []).map(formatProjectSubmission);
+}
+
+export async function getProjectSubmissionById(submissionId) {
+    const actor = await requirePermission('projects:view');
+    ensureSupabase();
+
+    const { data: submission, error } = await supabase
+        .from('project_submissions')
+        .select(`
+            *,
+            projects (id, title, description),
+            submitted_by: profiles!submitted_by (id, name),
+            approved_by: profiles!approved_by (id, name)
+        `)
+        .eq('id', submissionId)
+        .single();
+
+    if (error) throw error;
+    if (!submission) throw new Error('Submission not found');
+
+    return formatProjectSubmission(submission);
+}
+
+export async function approveProjectSubmission(submissionId, approvalNotes = '') {
+    const actor = await requirePermission('projects:approve');
+    ensureSupabase();
+
+    // Get submission
+    const { data: submission, error: submissionError } = await supabase
+        .from('project_submissions')
+        .select('*')
+        .eq('id', submissionId)
+        .single();
+
+    if (submissionError || !submission) throw new Error('Submission not found');
+
+    if (submission.status !== 'pending') {
+        throw new Error('Only pending submissions can be approved');
+    }
+
+    // Update submission
+    const { data: updated, error: updateError } = await supabase
+        .from('project_submissions')
+        .update({
+            status: 'approved',
+            approved_by: actor.id,
+            approved_at: new Date().toISOString(),
+        })
+        .eq('id', submissionId)
+        .select()
+        .single();
+
+    if (updateError) throw updateError;
+
+    // Update project status
+    await supabase
+        .from('projects')
+        .update({
+            project_status: 'completed',
+            completion_date: new Date().toISOString(),
+        })
+        .eq('id', submission.project_id);
+
+    // Notify submitter
+    const { data: submitter } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('id', submission.submitted_by)
+        .single();
+
+    if (submitter) {
+        await createNotification(
+            submitter.id,
+            'Project Approved',
+            'Your project submission has been approved!',
+            'project_approved',
+            { submissionId, projectId: submission.project_id }
+        );
+    }
+
+    // Emit socket event
+    socketManager.emit('project:approved', {
+        submissionId,
+        projectId: submission.project_id,
+        approvedBy: actor.id,
+    });
+
+    return formatProjectSubmission(updated);
+}
+
+export async function rejectProjectSubmission(submissionId, rejectionReason) {
+    const actor = await requirePermission('projects:approve');
+    ensureSupabase();
+
+    // Get submission
+    const { data: submission, error: submissionError } = await supabase
+        .from('project_submissions')
+        .select('*')
+        .eq('id', submissionId)
+        .single();
+
+    if (submissionError || !submission) throw new Error('Submission not found');
+
+    if (submission.status !== 'pending') {
+        throw new Error('Only pending submissions can be rejected');
+    }
+
+    // Update submission
+    const { data: updated, error: updateError } = await supabase
+        .from('project_submissions')
+        .update({
+            status: 'rejected',
+            approved_by: actor.id,
+            rejection_reason: rejectionReason,
+            approved_at: new Date().toISOString(),
+        })
+        .eq('id', submissionId)
+        .select()
+        .single();
+
+    if (updateError) throw updateError;
+
+    // Notify submitter
+    const { data: submitter } = await supabase
+        .from('profiles')
+        .select('id, name')
+        .eq('id', submission.submitted_by)
+        .single();
+
+    if (submitter) {
+        await createNotification(
+            submitter.id,
+            'Project Submission Rejected',
+            `Your project submission was rejected: ${rejectionReason}`,
+            'project_rejected',
+            { submissionId, projectId: submission.project_id }
+        );
+    }
+
+    // Emit socket event
+    socketManager.emit('project:rejected', {
+        submissionId,
+        projectId: submission.project_id,
+        rejectedBy: actor.id,
+        reason: rejectionReason,
+    });
+
+    return formatProjectSubmission(updated);
+}
+
+// =====================================================
+// Project Submission Helpers
+// =====================================================
+
+function formatProjectSubmission(submission) {
+    return {
+        id: submission.id,
+        projectId: submission.project_id,
+        submittedBy: submission.submitted_by,
+        approvedBy: submission.approved_by,
+        status: submission.status,
+        submissionNotes: submission.submission_notes,
+        rejectionReason: submission.rejection_reason,
+        submittedAt: submission.submitted_at,
+        approvedAt: submission.approved_at,
+        createdAt: submission.created_at,
+        project: submission.projects ? {
+            id: submission.projects.id,
+            title: submission.projects.title,
+            description: submission.projects.description,
+        } : null,
+        submitterName: submission.submitted_by?.name || 'Unknown',
+        approverName: submission.approved_by?.name || null,
     };
 }
 

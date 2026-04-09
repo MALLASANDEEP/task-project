@@ -30,7 +30,7 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
 
     const callId = call?.id;
     const callType = call?.type;
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:3001';
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8001';
     const remoteParticipantIds = useMemo(() => (call?.participants || []).filter((participantId) => participantId !== currentUserId), [call?.participants, currentUserId]);
     const isInitiator = Boolean(call && currentUserId && (call.initiatedBy === currentUserId));
 
@@ -237,6 +237,24 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
         await ensurePeerConnection(acceptedBy, stream, true);
       };
 
+      const handleCallStart = ({ callId: incomingCallId }) => {
+        if (!active || incomingCallId !== callId)
+          return;
+        setCallState('ongoing');
+      };
+
+      const handleCallRinging = ({ callId: incomingCallId }) => {
+        if (!active || incomingCallId !== callId)
+          return;
+        setCallState('ringing');
+      };
+
+      const handleCallRejected = ({ callId: incomingCallId }) => {
+        if (!active || incomingCallId !== callId)
+          return;
+        setCallState('ended');
+      };
+
       const handleCallEnded = ({ callId: incomingCallId }) => {
         if (incomingCallId !== callId)
           return;
@@ -249,6 +267,9 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
       socketManager.on('webrtc:answer', handleAnswer);
       socketManager.on('webrtc:ice-candidate', handleIceCandidate);
       socketManager.on('call:accepted', handleCallAccepted);
+      socketManager.on('call:start', handleCallStart);
+      socketManager.on('call:ringing', handleCallRinging);
+      socketManager.on('call:rejected', handleCallRejected);
       socketManager.on('call:ended', handleCallEnded);
 
       setLocalMedia().then(async (stream) => {
@@ -274,6 +295,9 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
         socketManager.off('webrtc:answer', handleAnswer);
         socketManager.off('webrtc:ice-candidate', handleIceCandidate);
         socketManager.off('call:accepted', handleCallAccepted);
+        socketManager.off('call:start', handleCallStart);
+        socketManager.off('call:ringing', handleCallRinging);
+        socketManager.off('call:rejected', handleCallRejected);
         socketManager.off('call:ended', handleCallEnded);
         cleanupAllPeers();
         stopLocalStream();
@@ -283,9 +307,9 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
     const handleJoin = async () => {
       if (!callId || !currentUserId)
         return;
-      socketManager.acceptCall(callId, currentUserId);
       setCallState('connecting');
       await onJoin?.();
+      socketManager.acceptCall(callId, currentUserId);
     };
 
     const handleEnd = async () => {
@@ -356,7 +380,7 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
         {mediaError && (<p className="mt-2 text-center text-sm text-destructive">{mediaError}</p>)}
 
         <div className="flex flex-wrap items-center justify-center gap-2 border-t border-border/70 px-6 py-5">
-          {canJoin && call?.status === 'ringing' && (<Button onClick={handleJoin} className="rounded-xl px-5">Join Call</Button>)}
+          {canJoin && callState !== 'ended' && (<Button onClick={handleJoin} className="rounded-xl px-5">{callState === 'ongoing' ? 'Join Ongoing Call' : 'Join Call'}</Button>)}
           <Button variant="outline" onClick={toggleMic} className="rounded-xl px-4">
             {micMuted ? <MicOff className="mr-1 h-4 w-4"/> : <Mic className="mr-1 h-4 w-4"/>}
             {micMuted ? 'Unmute' : 'Mute'}

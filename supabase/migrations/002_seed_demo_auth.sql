@@ -46,7 +46,7 @@ values
     crypt('user123', gen_salt('bf')),
     now(),
     jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
-    jsonb_build_object('name', 'Rohan Mehta', 'role', 'TEAM_MEMBER', 'avatar_url', ''),
+    jsonb_build_object('name', 'Rohan Mehta', 'role', 'TEAM_LEADER', 'avatar_url', ''),
     now(),
     now()
   ),
@@ -58,7 +58,7 @@ values
     crypt('user123', gen_salt('bf')),
     now(),
     jsonb_build_object('provider', 'email', 'providers', jsonb_build_array('email')),
-    jsonb_build_object('name', 'Sneha Gupta', 'role', 'VIEWER', 'avatar_url', ''),
+    jsonb_build_object('name', 'Sneha Gupta', 'role', 'TEAM_MEMBER', 'avatar_url', ''),
     now(),
     now()
   )

@@ -13,6 +13,7 @@ import { extractErrorMessage } from '@/lib/rbac';
 import { MessageCircle, Plus, Search, Phone, Video, Users } from 'lucide-react';
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } from '@/components/ui/context-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { useLocation } from 'react-router-dom';
 export default function MessagesPage() {
     const { user, can, role } = useAuth();
     const { toast } = useToast();
@@ -35,6 +36,8 @@ export default function MessagesPage() {
     const [composeTab, setComposeTab] = useState('message');
     const [composeQuery, setComposeQuery] = useState('');
     const [sidebarFilter, setSidebarFilter] = useState('all');
+    const [highlightedMessageId, setHighlightedMessageId] = useState('');
+    const location = useLocation();
     const dedupeMessages = useCallback((items) => {
       const map = new Map();
       (items || []).forEach((item) => {
@@ -101,8 +104,14 @@ export default function MessagesPage() {
     useEffect(() => {
       loadBase({ silent: false });
         const unsubscribe = api.subscribeCommunicationEvents((event) => {
-            if (event.type === 'message:new' || event.type === 'conversation:update') {
+            if (event.type === 'message:new' || event.type === 'conversation:update' || event.type === 'call:update') {
           loadBase({ silent: true });
+            }
+            if (event.type === 'call:update' && event.call && event.call.id === selectedCall?.id) {
+              setSelectedCall((previous) => previous?.id === event.call.id ? { ...previous, ...event.call } : previous);
+            }
+            else if (event.type === 'call:update' && event.callId && selectedCall?.id === event.callId) {
+              loadBase({ silent: true });
             }
             if (event.type === 'typing:update' && event.conversationId === selectedConversationId) {
                 api.getTypingUsers(selectedConversationId).then(setTypingUsers).catch(() => setTypingUsers([]));
@@ -110,6 +119,21 @@ export default function MessagesPage() {
         });
         return unsubscribe;
     }, [loadBase, selectedConversationId]);
+    useEffect(() => {
+      const params = new URLSearchParams(location.search);
+      const conversationId = params.get('conversation') || '';
+      const messageId = params.get('message') || '';
+      if (conversationId) {
+        setSelectedConversationId(conversationId);
+        setActiveTab('messages');
+      }
+      if (messageId) {
+        setHighlightedMessageId(messageId);
+      }
+      else {
+        setHighlightedMessageId('');
+      }
+    }, [location.search]);
     useEffect(() => {
       if (!selectedConversationId)
         return;
@@ -158,6 +182,11 @@ export default function MessagesPage() {
       setMessages([]);
       loadMessages(selectedConversationId, { silent: false });
     }, [loadMessages, selectedConversationId]);
+    useEffect(() => {
+      if (!highlightedMessageId)
+        return;
+      return undefined;
+    }, [highlightedMessageId, messages]);
     useEffect(() => {
       const unsubscribeCalls = api.subscribeToActiveCalls(async (event) => {
         await loadBase();
@@ -227,11 +256,17 @@ export default function MessagesPage() {
         .map((typingUserId) => usersById[typingUserId]?.name || 'Someone')
         .slice(0, 2)
         .join(', ');
-    const handleSend = async (text) => {
+    const handleSend = async (payload) => {
         if (!selectedConversationId)
             return;
       try {
-        await api.sendMessage({ conversationId: selectedConversationId, content: text });
+        const normalizedPayload = typeof payload === 'string' ? { content: payload } : (payload || {});
+        await api.sendMessage({
+          conversationId: selectedConversationId,
+          content: normalizedPayload.content || '',
+          fileUrl: normalizedPayload.fileUrl,
+          type: normalizedPayload.type || 'text',
+        });
         await loadMessages(selectedConversationId, { silent: true });
       }
       catch (error) {
@@ -500,7 +535,7 @@ export default function MessagesPage() {
                 {isMessagesLoading && selectedConversation && messages.length === 0 ? (<div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-muted-foreground">
                     Loading messages...
                   </div>) : selectedConversation ? (<div className="h-full flex flex-col">
-                      <ChatBox messages={messages} currentUserId={user.id} users={users} disabled={!can('chat:send')} typingLabel={typingLabel ? `${typingLabel} is typing...` : undefined} onSend={handleSend} onTyping={handleTyping} canDeleteMessage={canDeleteMessage} onDeleteMessage={handleDeleteMessage}/>
+                      <ChatBox messages={messages} currentUserId={user.id} users={users} disabled={!can('chat:send')} typingLabel={typingLabel ? `${typingLabel} is typing...` : undefined} onSend={handleSend} onTyping={handleTyping} canDeleteMessage={canDeleteMessage} onDeleteMessage={handleDeleteMessage} highlightedMessageId={highlightedMessageId}/>
                     </div>) : (<div className="flex h-full items-center justify-center rounded-2xl border border-dashed border-border/60 bg-card/60 text-muted-foreground">
                       <div className="text-center">
                         <MessageCircle className="mx-auto h-8 w-8 mb-2 opacity-50"/>
@@ -538,7 +573,7 @@ export default function MessagesPage() {
                           <div>
                             <p className="text-sm font-medium capitalize">{call.type} call</p>
                             <p className="text-xs text-muted-foreground">
-                              {call.participants.length} participants • Started {new Date(call.startedAt).toLocaleTimeString()}
+                              {call.initiatedBy === user?.id ? 'Outgoing' : 'Incoming'} • {call.participants.length} participants • Started {new Date(call.startedAt).toLocaleTimeString()}
                             </p>
                           </div>
                           <Badge variant="outline" className="capitalize">{call.status}</Badge>
@@ -645,7 +680,7 @@ export default function MessagesPage() {
         </DialogContent>
       </Dialog>
 
-      <CallModal open={!!selectedCall} call={selectedCall} canJoin={can('calls:join') && selectedCall?.participants.includes(user.id) === true} onJoin={joinSelectedCall} onEnd={endSelectedCall} currentUserId={user.id}/>
+      <CallModal open={!!selectedCall} call={selectedCall} canJoin={can('calls:join')} onJoin={joinSelectedCall} onEnd={endSelectedCall} currentUserId={user.id}/>
     </div>);
 }
 function getConversationTitle(conversation, usersById, projects, currentUserId) {

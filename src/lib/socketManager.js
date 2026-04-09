@@ -25,6 +25,7 @@ class SocketManager {
   connect(serverUrl, userId, conversationIds = []) {
     if (this.socket?.connected) {
       console.log('✓ Already connected to Socket server');
+      this.socket.emit('user:authenticate', userId, conversationIds);
       return;
     }
 

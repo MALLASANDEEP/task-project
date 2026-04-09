@@ -2,7 +2,7 @@ create extension if not exists pgcrypto;
 
 do $$
 begin
-  create type public.user_role as enum ('ADMIN', 'PROJECT_MANAGER', 'TEAM_MEMBER', 'VIEWER');
+  create type public.user_role as enum ('ADMIN', 'PROJECT_MANAGER', 'TEAM_LEADER', 'TEAM_MEMBER');
 exception
   when duplicate_object then null;
 end $$;
@@ -146,8 +146,9 @@ begin
       case upper(coalesce(new.raw_user_meta_data ->> 'role', ''))
         when 'ADMIN' then 'ADMIN'::public.user_role
         when 'PROJECT_MANAGER' then 'PROJECT_MANAGER'::public.user_role
+        when 'TEAM_LEADER' then 'TEAM_LEADER'::public.user_role
         when 'TEAM_MEMBER' then 'TEAM_MEMBER'::public.user_role
-        when 'VIEWER' then 'VIEWER'::public.user_role
+        when 'VIEWER' then 'TEAM_MEMBER'::public.user_role
         else null
       end,
       'TEAM_MEMBER'::public.user_role

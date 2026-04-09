@@ -9,9 +9,11 @@ import * as api from '@/services/api';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { roleLabel } from '@/lib/rbac';
+import { useNavigate } from 'react-router-dom';
 export function AppHeader() {
     const { user, role } = useAuth();
     const { toast } = useToast();
+  const navigate = useNavigate();
     const [notifications, setNotifications] = useState([]);
     const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
     useEffect(() => {
@@ -49,12 +51,22 @@ export function AppHeader() {
         if (!user)
             return;
         const unsubscribe = api.subscribeCommunicationEvents((event) => {
-            if (event.type === 'call:update' && event.call.status === 'ringing' && event.call.participants.includes(user.id)) {
+          const isIncomingRing = event.type === 'call:update'
+            && event.call?.status === 'ringing'
+            && event.call.participants.includes(user.id)
+            && event.call.initiatedBy !== user.id;
+          if (isIncomingRing) {
                 toast({
                     title: 'Incoming call',
                     description: `You have an incoming ${event.call.type} call.`,
                 });
             }
+          if (event.type === 'call:update' && event.callId) {
+            toast({
+              title: 'Call updated',
+              description: 'A call status changed. Open Messages or Calls to join or continue.',
+            });
+          }
         });
         return unsubscribe;
     }, [user, toast]);
@@ -67,6 +79,12 @@ export function AppHeader() {
     const markRead = async (id) => {
         await api.markNotificationRead(id);
         setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    };
+    const handleNotificationClick = async (notification) => {
+      await markRead(notification.id).catch(() => undefined);
+      if (notification.linkPath) {
+        navigate(notification.linkPath);
+      }
     };
     const markAllRead = async () => {
         if (!user)
@@ -109,10 +127,11 @@ export function AppHeader() {
             </div>
             <div className="max-h-80 overflow-y-auto">
               {notifications.length === 0 && <p className="p-4 text-sm text-muted-foreground text-center">No notifications</p>}
-              {notifications.map(n => (<button key={n.id} className={`w-full text-left p-3 border-b border-border/50 last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`} onClick={() => markRead(n.id)}>
+              {notifications.map(n => (<button key={n.id} className={`w-full text-left p-3 border-b border-border/50 last:border-0 hover:bg-muted/50 transition-colors ${!n.read ? 'bg-primary/5' : ''}`} onClick={() => handleNotificationClick(n)}>
                   <p className="text-sm font-medium">{n.title}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">{n.message}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleDateString()}</p>
+                  {(n.type === 'message' || n.type === 'mention') && n.linkPath ? (<p className="mt-1 text-[10px] font-medium text-primary">Go to message</p>) : null}
+                  <p className="text-[10px] text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</p>
                 </button>))}
             </div>
           </PopoverContent>

@@ -20,6 +20,7 @@ function WorkspaceDashboard({ role }) {
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
     const [teams, setTeams] = useState([]);
+  const [taskFilter, setTaskFilter] = useState('all');
     useEffect(() => {
         const load = async () => {
             const [taskData, projectData, teamsData] = await Promise.all([
@@ -38,6 +39,13 @@ function WorkspaceDashboard({ role }) {
     const completedTasks = tasks.filter((t) => t.status === 'completed').length;
     const pendingTasks = tasks.filter((t) => t.status !== 'completed').length;
     const overdueTasks = tasks.filter((t) => t.status !== 'completed' && new Date(t.dueDate).getTime() < now).length;
+    const filteredTasks = useMemo(() => {
+      if (taskFilter === 'completed')
+        return tasks.filter((task) => task.status === 'completed');
+      if (taskFilter === 'pending')
+        return tasks.filter((task) => task.status !== 'completed');
+      return tasks;
+    }, [taskFilter, tasks]);
     const statusData = [
         { name: 'To Do', value: tasks.filter((t) => t.status === 'pending').length, color: '#f59e0b' },
         { name: 'In Progress', value: tasks.filter((t) => t.status === 'in_progress').length, color: '#4f46e5' },
@@ -78,9 +86,9 @@ function WorkspaceDashboard({ role }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard title="Total Tasks" value={totalTasks} icon={ListChecks} color="text-primary" tone="bg-primary/10"/>
-        <SummaryCard title="Completed Tasks" value={completedTasks} icon={CheckCircle2} color="text-[hsl(var(--success))]" tone="bg-[hsl(var(--success))]/10"/>
-        <SummaryCard title="Pending Tasks" value={pendingTasks} icon={Clock3} color="text-[hsl(var(--warning))]" tone="bg-[hsl(var(--warning))]/10"/>
+        <SummaryCard title="Total Tasks" value={totalTasks} icon={ListChecks} color="text-primary" tone="bg-primary/10" onClick={() => setTaskFilter('all')} active={taskFilter === 'all'}/>
+        <SummaryCard title="Completed Tasks" value={completedTasks} icon={CheckCircle2} color="text-[hsl(var(--success))]" tone="bg-[hsl(var(--success))]/10" onClick={() => setTaskFilter('completed')} active={taskFilter === 'completed'}/>
+        <SummaryCard title="Pending Tasks" value={pendingTasks} icon={Clock3} color="text-[hsl(var(--warning))]" tone="bg-[hsl(var(--warning))]/10" onClick={() => setTaskFilter('pending')} active={taskFilter === 'pending'}/>
         <SummaryCard title="Overdue Tasks" value={overdueTasks} icon={AlertTriangle} color="text-destructive" tone="bg-destructive/10"/>
       </div>
 
@@ -141,7 +149,7 @@ function WorkspaceDashboard({ role }) {
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-lg">Recent Tasks</CardTitle>
-              <CardDescription>Latest updates from your workspace</CardDescription>
+              <CardDescription>Latest updates from your workspace ({taskFilter})</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="gap-1">
               View All
@@ -149,7 +157,18 @@ function WorkspaceDashboard({ role }) {
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {tasks.slice(0, 5).map((task) => (<div 
+            <div className="flex items-center gap-2 pb-1">
+              <Button variant={taskFilter === 'all' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('all')}>
+                All
+              </Button>
+              <Button variant={taskFilter === 'completed' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('completed')}>
+                Completed
+              </Button>
+              <Button variant={taskFilter === 'pending' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('pending')}>
+                Pending
+              </Button>
+            </div>
+            {filteredTasks.slice(0, 5).map((task) => (<div 
               key={task.id} 
               className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
               onClick={() => navigate('/tasks')}
@@ -160,7 +179,7 @@ function WorkspaceDashboard({ role }) {
                 </div>
                 <StatusBadge status={task.status}/>
               </div>))}
-            {tasks.length === 0 && <EmptyState message="No tasks found yet. Create your first task to get started."/>}
+            {filteredTasks.length === 0 && <EmptyState message={`No ${taskFilter === 'all' ? '' : `${taskFilter} `}tasks found yet.`}/>} 
           </CardContent>
         </Card>
 
@@ -225,6 +244,7 @@ function MemberDashboard({ userId }) {
     const [tasks, setTasks] = useState([]);
     const [projects, setProjects] = useState([]);
     const [teams, setTeams] = useState([]);
+  const [taskFilter, setTaskFilter] = useState('all');
     useEffect(() => {
         const load = async () => {
             const [taskData, projectData, teamsData] = await Promise.all([
@@ -243,6 +263,14 @@ function MemberDashboard({ userId }) {
     const completed = tasks.filter((t) => t.status === 'completed').length;
     const inProgress = tasks.filter((t) => t.status === 'in_progress').length;
     const overdue = tasks.filter((t) => t.status !== 'completed' && new Date(t.dueDate).getTime() < Date.now()).length;
+    const pending = tasks.filter((t) => t.status !== 'completed').length;
+    const filteredTasks = useMemo(() => {
+      if (taskFilter === 'completed')
+        return tasks.filter((task) => task.status === 'completed');
+      if (taskFilter === 'pending')
+        return tasks.filter((task) => task.status !== 'completed');
+      return tasks;
+    }, [taskFilter, tasks]);
     return (<div className="space-y-6">
       <div>
         <h1 className="text-3xl font-semibold">My Work</h1>
@@ -250,9 +278,9 @@ function MemberDashboard({ userId }) {
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <SummaryCard title="Completed" value={completed} icon={CheckCircle2} color="text-[hsl(var(--success))]" tone="bg-[hsl(var(--success))]/10"/>
+        <SummaryCard title="Completed" value={completed} icon={CheckCircle2} color="text-[hsl(var(--success))]" tone="bg-[hsl(var(--success))]/10" onClick={() => setTaskFilter('completed')} active={taskFilter === 'completed'}/>
         <SummaryCard title="In Progress" value={inProgress} icon={Clock3} color="text-primary" tone="bg-primary/10"/>
-        <SummaryCard title="Overdue" value={overdue} icon={AlertTriangle} color="text-destructive" tone="bg-destructive/10"/>
+        <SummaryCard title="Pending" value={pending} icon={ListChecks} color="text-[hsl(var(--warning))]" tone="bg-[hsl(var(--warning))]/10" onClick={() => setTaskFilter('pending')} active={taskFilter === 'pending'}/>
       </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
@@ -260,7 +288,7 @@ function MemberDashboard({ userId }) {
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <div>
               <CardTitle className="text-lg">My Tasks</CardTitle>
-              <CardDescription>Tasks assigned to you</CardDescription>
+              <CardDescription>Tasks assigned to you ({taskFilter})</CardDescription>
             </div>
             <Button variant="ghost" size="sm" onClick={() => navigate('/tasks')} className="gap-1">
               View All
@@ -268,7 +296,18 @@ function MemberDashboard({ userId }) {
             </Button>
           </CardHeader>
           <CardContent className="space-y-3">
-            {tasks.slice(0, 5).map((task) => (<div 
+            <div className="flex items-center gap-2 pb-1">
+              <Button variant={taskFilter === 'all' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('all')}>
+                All
+              </Button>
+              <Button variant={taskFilter === 'completed' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('completed')}>
+                Completed
+              </Button>
+              <Button variant={taskFilter === 'pending' ? 'default' : 'outline'} size="sm" className="h-7 rounded-full px-3 text-xs" onClick={() => setTaskFilter('pending')}>
+                Pending
+              </Button>
+            </div>
+            {filteredTasks.slice(0, 5).map((task) => (<div 
               key={task.id}
               className="flex items-center justify-between rounded-xl border border-border/70 bg-background/60 p-3 hover:bg-background/80 cursor-pointer transition-colors"
               onClick={() => navigate('/tasks')}
@@ -279,7 +318,7 @@ function MemberDashboard({ userId }) {
                 </div>
                 <StatusBadge status={task.status}/>
               </div>))}
-            {tasks.length === 0 && <EmptyState message="No tasks assigned yet."/>}
+            {filteredTasks.length === 0 && <EmptyState message={`No ${taskFilter === 'all' ? '' : `${taskFilter} `}tasks assigned yet.`}/>} 
           </CardContent>
         </Card>
 
@@ -343,10 +382,10 @@ function MemberDashboard({ userId }) {
       </div>
     </div>);
 }
-function SummaryCard({ title, value, icon: Icon, tone, color, }) {
-    return (<Card>
+function SummaryCard({ title, value, icon: Icon, tone, color, onClick, active = false, }) {
+    return (<Card className={onClick ? `transition-colors ${active ? 'ring-1 ring-primary/40 border-primary/40' : 'hover:border-primary/30'}` : ''}>
       <CardContent className="p-5">
-        <div className="flex items-start justify-between">
+        <button type="button" onClick={onClick} className="flex w-full items-start justify-between text-left" disabled={!onClick}>
           <div>
             <p className="text-sm text-muted-foreground">{title}</p>
             <p className="text-3xl font-semibold mt-2">{value}</p>
@@ -354,7 +393,7 @@ function SummaryCard({ title, value, icon: Icon, tone, color, }) {
           <div className={`rounded-xl p-2.5 ${tone}`}>
             <Icon className={`h-5 w-5 ${color}`}/>
           </div>
-        </div>
+        </button>
       </CardContent>
     </Card>);
 }
