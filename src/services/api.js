@@ -107,6 +107,7 @@ function mapProfileRow(profile) {
         email: profile.email,
         role: mapRoleFromDb(profile.role),
         status: profile.status,
+        avatarUrl: profile.avatar_url || null,
         createdAt: profile.created_at,
     };
 }
@@ -495,6 +496,153 @@ export async function logout() {
         await supabase.auth.signOut();
     }
     activeUserId = null;
+}
+export async function initiateGoogleSignIn() {
+    ensureSupabase();
+    // Use current origin to support any port/domain (localhost:8081, localhost:3000, production, etc.)
+    const redirectUrl = `${window.location.origin}/auth/callback`;
+    try {
+        const { data, error } = await supabase.auth.signInWithOAuth({
+            provider: 'google',
+            options: {
+                redirectTo: redirectUrl,
+                queryParams: {
+                    access_type: 'offline',
+                    prompt: 'consent',
+                },
+            },
+        });
+        if (error) {
+            throw error;
+        }
+        return data;
+    }
+    catch (err) {
+        console.error('[GOOGLE_SIGNIN] OAuth error:', err);
+        throw new Error(String(err?.message || 'Failed to initiate Google sign-in. Ensure Google OAuth is configured in Supabase and the redirect URL matches your app origin.'));
+    }
+}
+export async function ensureProfileAfterOAuth() {
+    if (!activeUserId) {
+        throw new Error('No authenticated user');
+    }
+    ensureSupabase();
+    const { data: profile, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', activeUserId)
+        .maybeSingle();
+    if (error) {
+        console.error('[OAUTH_PROFILE] Profile fetch error:', error.message);
+        return null;
+    }
+    if (profile) {
+        return mapProfileRow(profile);
+    }
+    const { data: authUser, error: authError } = await supabase.auth.getUser();
+    if (authError || !authUser?.user) {
+        throw new Error('Unable to fetch current user');
+    }
+    const user = authUser.user;
+    const namePart = user.user_metadata?.name || user.email?.split('@')[0] || 'User';
+    const { data: newProfile, error: insertError } = await supabase
+        .from('profiles')
+        .insert([{
+            id: user.id,
+            name: namePart,
+            email: user.email || '',
+            role: mapRoleToDb('TEAM_MEMBER'),
+            status: 'active',
+        }])
+        .select()
+        .single();
+    if (insertError) {
+        console.error('[OAUTH_PROFILE] Profile creation error:', insertError.message);
+        return null;
+    }
+    return newProfile ? mapProfileRow(newProfile) : null;
+}
+export async function changePassword(currentPassword, newPassword) {
+    const user = await requireUser();
+    ensureSupabase();
+    if (!currentPassword || !newPassword) {
+        throw new Error('Current and new passwords are required');
+    }
+    if (newPassword.length < 6) {
+        throw new Error('New password must be at least 6 characters');
+    }
+    try {
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+            email: user.email,
+            password: currentPassword,
+        });
+        if (signInError) {
+            throw new Error('Current password is incorrect');
+        }
+    }
+    catch (err) {
+        throw new Error(String(err?.message || 'Failed to verify current password'));
+    }
+    try {
+        const { error: updateError } = await supabase.auth.updateUser({
+            password: newPassword,
+        });
+        if (updateError) {
+            throw updateError;
+        }
+    }
+    catch (err) {
+        throw new Error(String(err?.message || 'Failed to update password'));
+    }
+    await writeAudit('CHANGE_PASSWORD', 'user', user.id);
+    return true;
+}
+export async function updateOwnProfile(data) {
+    const actor = await requireUser();
+    ensureSupabase();
+    const nextName = typeof data?.name === 'string' ? data.name.trim() : '';
+    const nextEmail = typeof data?.email === 'string' ? data.email.trim() : '';
+    const updateData = {};
+    if (nextName)
+        updateData.name = nextName;
+    if (nextEmail)
+        updateData.email = nextEmail;
+    if (Object.prototype.hasOwnProperty.call(data || {}, 'avatarUrl')) {
+        updateData.avatar_url = data.avatarUrl || null;
+    }
+    if (!Object.keys(updateData).length) {
+        return actor;
+    }
+    let updated = null;
+    let { data: updatedData, error } = await supabase
+        .from('profiles')
+        .update(updateData)
+        .eq('id', actor.id)
+        .select('*')
+        .single();
+    if (error && isMissingColumnError(error, 'avatar_url') && Object.prototype.hasOwnProperty.call(updateData, 'avatar_url')) {
+        delete updateData.avatar_url;
+        const fallbackResult = await supabase
+            .from('profiles')
+            .update(updateData)
+            .eq('id', actor.id)
+            .select('*')
+            .single();
+        updatedData = fallbackResult.data;
+        error = fallbackResult.error;
+    }
+    if (error)
+        throw error;
+    updated = mapProfileRow(updatedData);
+    if (Object.prototype.hasOwnProperty.call(data || {}, 'avatarUrl') && !Object.prototype.hasOwnProperty.call(updatedData || {}, 'avatar_url')) {
+        updated.avatarUrl = data.avatarUrl || null;
+    }
+    if (nextEmail && nextEmail !== actor.email && supabase?.auth?.updateUser) {
+        // Email updates can require confirmation; keep profile row as source of truth for immediate UI updates.
+        await supabase.auth.updateUser({ email: nextEmail }).catch(() => undefined);
+    }
+    await writeAudit('UPDATE_SELF_PROFILE', 'user', actor.id);
+    return updated;
 }
 // ── Users ─────────────────────────────────────────────
 export async function getUsers() {

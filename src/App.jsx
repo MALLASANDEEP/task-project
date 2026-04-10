@@ -9,6 +9,7 @@ import { AppLayout } from "@/components/AppLayout";
 import { NotificationListener } from "@/components/NotificationListener";
 import LoginPage from "./pages/Login";
 import RegisterPage from "./pages/Register";
+import OAuthCallback from "./pages/OAuthCallback";
 import Dashboard from "./pages/Dashboard";
 import Analytics from "./pages/Analytics";
 import Projects from "./pages/Projects";
@@ -34,6 +35,7 @@ const App = () => (<QueryClientProvider client={queryClient}>
             <Route path="/" element={<Navigate to="/dashboard" replace/>}/>
             <Route path="/login" element={<LoginPage />}/>
             <Route path="/register" element={<RegisterPage />}/>
+            <Route path="/auth/callback" element={<OAuthCallback />}/>
             <Route element={<ProtectedRoute><AppLayout /></ProtectedRoute>}>
               <Route path="/dashboard" element={<Dashboard />}/>
               <Route path="/analytics" element={<Analytics />}/>

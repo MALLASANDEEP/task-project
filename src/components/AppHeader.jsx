@@ -1,21 +1,45 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Bell, Check, Moon, Search, Sun } from 'lucide-react';
+import { Bell, Check, LogOut, Moon, Search, Settings, Sun, Upload, UserPen } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import * as api from '@/services/api';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { roleLabel } from '@/lib/rbac';
 import { useNavigate } from 'react-router-dom';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
 export function AppHeader() {
-    const { user, role } = useAuth();
-    const { toast } = useToast();
+    const { user, role, logout, updateProfile } = useAuth();
+  const { toast } = useToast();
   const navigate = useNavigate();
     const [notifications, setNotifications] = useState([]);
     const [isDark, setIsDark] = useState(() => document.documentElement.classList.contains('dark'));
+    const [isProfileDialogOpen, setIsProfileDialogOpen] = useState(false);
+    const [profileName, setProfileName] = useState('');
+    const [profileEmail, setProfileEmail] = useState('');
+    const [profileImage, setProfileImage] = useState('');
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const fileInputRef = useRef(null);
     useEffect(() => {
         let active = true;
         if (!user) {
@@ -70,7 +94,13 @@ export function AppHeader() {
         });
         return unsubscribe;
     }, [user, toast]);
+    useEffect(() => {
+      setProfileName(user?.name || '');
+      setProfileEmail(user?.email || '');
+      setProfileImage(user?.avatarUrl || '');
+    }, [user]);
     const unreadCount = notifications.filter(n => !n.read).length;
+    const profileInitial = user?.name?.charAt(0).toUpperCase() ?? '?';
     const toggleTheme = () => {
         const root = document.documentElement;
         root.classList.toggle('dark');
@@ -91,6 +121,50 @@ export function AppHeader() {
             return;
         await api.markAllNotificationsRead(user.id);
         setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    };
+    const openProfileEditor = () => {
+      setProfileName(user?.name || '');
+      setProfileEmail(user?.email || '');
+      setProfileImage(user?.avatarUrl || '');
+      setIsProfileDialogOpen(true);
+    };
+    const onImageSelected = (event) => {
+      const file = event.target.files?.[0];
+      if (!file)
+        return;
+      if (!file.type.startsWith('image/')) {
+        toast({ title: 'Please choose an image file', variant: 'destructive' });
+        return;
+      }
+      if (file.size > 1024 * 1024) {
+        toast({ title: 'Image size must be 1MB or less', variant: 'destructive' });
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        setProfileImage(typeof reader.result === 'string' ? reader.result : '');
+      };
+      reader.readAsDataURL(file);
+    };
+    const saveProfile = async (event) => {
+      event.preventDefault();
+      if (!profileName.trim() || !profileEmail.trim()) {
+        toast({ title: 'Name and email are required', variant: 'destructive' });
+        return;
+      }
+      setIsSavingProfile(true);
+      const updated = await updateProfile({
+        name: profileName.trim(),
+        email: profileEmail.trim(),
+        avatarUrl: profileImage || null,
+      });
+      setIsSavingProfile(false);
+      if (updated) {
+        toast({ title: 'Profile updated' });
+        setIsProfileDialogOpen(false);
+        return;
+      }
+      toast({ title: 'Unable to update profile', variant: 'destructive' });
     };
     return (<header className="sticky top-0 z-30 h-16 flex items-center justify-between border-b border-border/60 bg-background/85 px-4 md:px-6 backdrop-blur-xl shrink-0">
       <div className="flex items-center gap-3 min-w-0">
@@ -137,17 +211,92 @@ export function AppHeader() {
           </PopoverContent>
         </Popover>
 
-        <div className="hidden sm:flex items-center gap-2 rounded-xl border border-border/70 bg-card/90 px-2.5 py-1.5 shadow-sm">
-          <div className="h-8 w-8 rounded-lg bg-gradient-to-br from-primary/95 to-primary/70 text-primary-foreground flex items-center justify-center text-sm font-bold">
-            {user?.name?.charAt(0).toUpperCase() ?? '?'}
-          </div>
-          <div className="min-w-0">
-            <p className="text-xs font-medium truncate max-w-[120px]">{user?.name || 'User'}</p>
-            <p className="text-[10px] text-muted-foreground truncate max-w-[120px]">{user?.email || ''}</p>
-          </div>
-          {role && <Badge variant="secondary" className="ml-1 text-[10px]">{roleLabel(role)}</Badge>}
-        </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="rounded-full" aria-label="Open profile menu">
+              <Avatar className="h-9 w-9 border border-border/70">
+                <AvatarImage src={user?.avatarUrl || ''} alt={user?.name || 'User'} />
+                <AvatarFallback className="font-semibold">{profileInitial}</AvatarFallback>
+              </Avatar>
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72 p-2">
+            <DropdownMenuLabel className="px-2 py-2">
+              <div className="flex items-center gap-3">
+                <Avatar className="h-9 w-9 border border-border/70">
+                  <AvatarImage src={user?.avatarUrl || ''} alt={user?.name || 'User'} />
+                  <AvatarFallback className="font-semibold">{profileInitial}</AvatarFallback>
+                </Avatar>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium truncate">{user?.name || 'User'}</p>
+                  <p className="text-xs text-muted-foreground truncate">{user?.email || ''}</p>
+                </div>
+              </div>
+              {role && <Badge variant="secondary" className="mt-2 text-[10px]">{roleLabel(role)}</Badge>}
+            </DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={openProfileEditor}>
+              <UserPen className="h-4 w-4 mr-2" />
+              Edit Profile
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => navigate('/settings')}>
+              <Settings className="h-4 w-4 mr-2" />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={logout}>
+              <LogOut className="h-4 w-4 mr-2" />
+              Logout
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
+
+      <Dialog open={isProfileDialogOpen} onOpenChange={setIsProfileDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Edit Profile</DialogTitle>
+            <DialogDescription>Update your personal details and profile image.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={saveProfile} className="space-y-4">
+            <div className="flex items-center gap-3">
+              <Avatar className="h-14 w-14 border border-border/70">
+                <AvatarImage src={profileImage || ''} alt={profileName || 'User'} />
+                <AvatarFallback className="font-semibold">{profileName?.charAt(0).toUpperCase() || profileInitial}</AvatarFallback>
+              </Avatar>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-4 w-4 mr-2" />
+                  Upload
+                </Button>
+                {profileImage && (<Button type="button" variant="ghost" size="sm" onClick={() => setProfileImage('')}>
+                    Remove
+                  </Button>)}
+              </div>
+              <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onImageSelected} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="profile-name">Full Name</Label>
+              <Input id="profile-name" value={profileName} onChange={(event) => setProfileName(event.target.value)} />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="profile-email">Email</Label>
+              <Input id="profile-email" type="email" value={profileEmail} onChange={(event) => setProfileEmail(event.target.value)} />
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="ghost" onClick={() => setIsProfileDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSavingProfile}>
+                {isSavingProfile ? 'Saving...' : 'Save Changes'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </header>);
 }
 

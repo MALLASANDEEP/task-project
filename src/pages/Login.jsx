@@ -7,10 +7,12 @@ import { Separator } from '@/components/ui/separator';
 import { Layers, Github, Chrome } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { FloatingInput } from '@/components/ui/floating-field';
+import * as api from '@/services/api';
 export default function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [loading, setLoading] = useState(false);
+    const [oauthLoading, setOauthLoading] = useState(false);
     const { login } = useAuth();
     const navigate = useNavigate();
     const { toast } = useToast();
@@ -24,6 +26,16 @@ export default function LoginPage() {
         }
         else {
             toast({ title: 'Login failed', description: 'Invalid email or password.', variant: 'destructive' });
+        }
+    };
+    const handleGoogleSignIn = async () => {
+        setOauthLoading(true);
+        try {
+            await api.initiateGoogleSignIn();
+        }
+        catch (error) {
+            toast({ title: 'Google sign-in failed', description: String(error?.message || 'Unable to connect to Google'), variant: 'destructive' });
+            setOauthLoading(false);
         }
     };
     return (<div className="min-h-screen flex items-center justify-center px-4 py-8">
@@ -54,10 +66,10 @@ export default function LoginPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              <Button variant="outline" className="gap-2" onClick={() => toast({ title: 'OAuth', description: 'Connect your backend to enable Google sign-in.' })}>
-                <Chrome className="h-4 w-4"/> Google
+              <Button variant="outline" className="gap-2" onClick={handleGoogleSignIn} disabled={oauthLoading}>
+                <Chrome className="h-4 w-4"/> {oauthLoading ? 'Signing...' : 'Google'}
               </Button>
-              <Button variant="outline" className="gap-2" onClick={() => toast({ title: 'OAuth', description: 'Connect your backend to enable GitHub sign-in.' })}>
+              <Button variant="outline" className="gap-2" onClick={() => toast({ title: 'OAuth', description: 'GitHub sign-in coming soon.' })}>
                 <Github className="h-4 w-4"/> GitHub
               </Button>
             </div>

@@ -32,7 +32,14 @@ export function AuthProvider({ children }) {
             if (!mounted)
                 return;
             if (result) {
-                setState({ user: result.user, token: result.token, isAuthenticated: true });
+                setState((previous) => ({
+                    user: {
+                        ...result.user,
+                        avatarUrl: result.user?.avatarUrl || previous.user?.avatarUrl || null,
+                    },
+                    token: result.token,
+                    isAuthenticated: true,
+                }));
                 api.setActiveUserId(result.user.id);
             }
             else {
@@ -78,9 +85,22 @@ export function AuthProvider({ children }) {
         await api.logout();
         setState({ user: null, token: null, isAuthenticated: false });
     }, []);
-    const updateProfile = useCallback((data) => {
-        setState(prev => prev.user ? { ...prev, user: { ...prev.user, ...data } } : prev);
-    }, []);
+    const updateProfile = useCallback(async (data) => {
+        if (!state.user)
+            return false;
+        let nextUserData = data;
+        try {
+            const persisted = await api.updateOwnProfile(data);
+            if (persisted) {
+                nextUserData = persisted;
+            }
+        }
+        catch (err) {
+            console.error('[AuthContext] Profile update error:', err);
+        }
+        setState((prev) => prev.user ? { ...prev, user: { ...prev.user, ...nextUserData } } : prev);
+        return true;
+    }, [state.user]);
     useEffect(() => {
         api.setActiveUserId(state.user?.id || null);
     }, [state.user?.id]);

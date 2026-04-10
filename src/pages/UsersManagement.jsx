@@ -136,7 +136,7 @@ export default function UsersPage() {
 function UserForm({ user, onSave }) {
     const [name, setName] = useState(user?.name || '');
     const [email, setEmail] = useState(user?.email || '');
-    const [role, setRole] = useState(user?.role || 'TEAM_LEADER');
+    const [role, setRole] = useState(user?.role || 'TEAM_MEMBER');
     const [status, setStatus] = useState(user?.status || 'active');
     const [errors, setErrors] = useState({});
     const { toast } = useToast();
@@ -173,10 +173,10 @@ function UserForm({ user, onSave }) {
           <Select value={role} onValueChange={v => setRole(v)}>
             <SelectTrigger className="h-11 rounded-xl"><SelectValue placeholder="Role"/></SelectTrigger>
             <SelectContent>
-              <SelectItem value="ADMIN">ADMIN</SelectItem>
-              <SelectItem value="PROJECT_MANAGER">PROJECT_MANAGER</SelectItem>
-              <SelectItem value="TEAM_LEADER">TEAM_LEADER</SelectItem>
               <SelectItem value="TEAM_MEMBER">TEAM_MEMBER</SelectItem>
+              <SelectItem value="TEAM_LEADER">TEAM_LEADER</SelectItem>
+              <SelectItem value="PROJECT_MANAGER">PROJECT_MANAGER</SelectItem>
+              <SelectItem value="ADMIN">ADMIN</SelectItem>
             </SelectContent>
           </Select>
         </div>

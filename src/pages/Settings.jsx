@@ -7,39 +7,60 @@ import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { roleLabel } from '@/lib/rbac';
+import * as api from '@/services/api';
 export default function SettingsPage() {
     const { user, updateProfile } = useAuth();
-  const isViewer = user?.role === 'TEAM_MEMBER';
     const [name, setName] = useState(user?.name || '');
     const [email, setEmail] = useState(user?.email || '');
     const [currentPw, setCurrentPw] = useState('');
     const [newPw, setNewPw] = useState('');
     const [confirmPw, setConfirmPw] = useState('');
+    const [isChangingPw, setIsChangingPw] = useState(false);
     const { toast } = useToast();
     const handleProfile = (e) => {
         e.preventDefault();
-        if (isViewer) {
-          toast({ title: 'TEAM_MEMBER role is read-only', variant: 'destructive' });
+      updateProfile({ name, email })
+        .then((ok) => {
+        if (ok) {
+          toast({ title: 'Profile updated' });
+          return;
+        }
+        toast({ title: 'Unable to update profile', variant: 'destructive' });
+      })
+        .catch(() => toast({ title: 'Unable to update profile', variant: 'destructive' }));
+    };
+    const handlePassword = async (e) => {
+        e.preventDefault();
+        if (!currentPw.trim()) {
+            toast({ title: 'Current password is required', variant: 'destructive' });
             return;
         }
-        updateProfile({ name, email });
-        toast({ title: 'Profile updated' });
-    };
-    const handlePassword = (e) => {
-        e.preventDefault();
-        if (isViewer) {
-          toast({ title: 'TEAM_MEMBER role is read-only', variant: 'destructive' });
+        if (!newPw.trim()) {
+            toast({ title: 'New password is required', variant: 'destructive' });
+            return;
+        }
+        if (newPw.length < 6) {
+            toast({ title: 'New password must be at least 6 characters', variant: 'destructive' });
             return;
         }
         if (newPw !== confirmPw) {
             toast({ title: 'Passwords do not match', variant: 'destructive' });
             return;
         }
-        // In real app: call api.changePassword(currentPw, newPw)
-        toast({ title: 'Password changed', description: 'Connect your backend to persist this change.' });
-        setCurrentPw('');
-        setNewPw('');
-        setConfirmPw('');
+        setIsChangingPw(true);
+        try {
+            await api.changePassword(currentPw, newPw);
+            toast({ title: 'Password updated successfully' });
+            setCurrentPw('');
+            setNewPw('');
+            setConfirmPw('');
+        }
+        catch (error) {
+            toast({ title: String(error?.message || 'Failed to change password'), variant: 'destructive' });
+        }
+        finally {
+            setIsChangingPw(false);
+        }
     };
     return (<div className="max-w-2xl space-y-6">
       <div>
@@ -57,7 +78,7 @@ export default function SettingsPage() {
               <Label>Role</Label>
               <Input value={user?.role ? roleLabel(user.role) : 'Unknown'} disabled/>
             </div>
-            <Button type="submit" disabled={isViewer}>Save Changes</Button>
+            <Button type="submit">Save Changes</Button>
           </form>
         </CardContent>
       </Card>
@@ -66,11 +87,11 @@ export default function SettingsPage() {
         <CardHeader><CardTitle className="text-lg">Change Password</CardTitle><CardDescription>Update your account password</CardDescription></CardHeader>
         <CardContent>
           <form onSubmit={handlePassword} className="space-y-4">
-            <div className="space-y-2"><Label>Current Password</Label><Input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} required/></div>
+            <div className="space-y-2"><Label>Current Password</Label><Input type="password" value={currentPw} onChange={e => setCurrentPw(e.target.value)} disabled={isChangingPw} required/></div>
             <Separator />
-            <div className="space-y-2"><Label>New Password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} required minLength={6}/></div>
-            <div className="space-y-2"><Label>Confirm New Password</Label><Input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} required/></div>
-            <Button type="submit" disabled={isViewer}>Update Password</Button>
+            <div className="space-y-2"><Label>New Password</Label><Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} disabled={isChangingPw} required minLength={6}/></div>
+            <div className="space-y-2"><Label>Confirm New Password</Label><Input type="password" value={confirmPw} onChange={e => setConfirmPw(e.target.value)} disabled={isChangingPw} required/></div>
+            <Button type="submit" disabled={isChangingPw}>{isChangingPw ? 'Updating...' : 'Update Password'}</Button>
           </form>
         </CardContent>
       </Card>
