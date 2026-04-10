@@ -30,7 +30,7 @@ export function CallModal({ open, call, canJoin, onJoin, onEnd, currentUserId, }
 
     const callId = call?.id;
     const callType = call?.type;
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8001';
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'https://task-project-3frx.onrender.com';
     const remoteParticipantIds = useMemo(() => (call?.participants || []).filter((participantId) => participantId !== currentUserId), [call?.participants, currentUserId]);
     const isInitiator = Boolean(call && currentUserId && (call.initiatedBy === currentUserId));
 

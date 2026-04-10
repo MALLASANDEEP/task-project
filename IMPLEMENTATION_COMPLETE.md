@@ -247,7 +247,7 @@ npm run dev:all
 ```
 
 ### 5. **Test the System**
-- Open http://localhost:5173
+- Open https://task-project-3frx.onrender.com
 - Create two accounts (or use two browser tabs)
 - Send messages - they appear instantly on both sides
 - Make a call - see WebRTC connect and video stream

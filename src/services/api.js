@@ -499,7 +499,7 @@ export async function logout() {
 }
 export async function initiateGoogleSignIn() {
     ensureSupabase();
-    // Use current origin to support any port/domain (localhost:8081, localhost:3000, production, etc.)
+    // Use current origin to support any port/domain (task-project-3frx.onrender.com, task-project-3frx.onrender.com, production, etc.)
     const redirectUrl = `${window.location.origin}/auth/callback`;
     try {
         const { data, error } = await supabase.auth.signInWithOAuth({

@@ -130,7 +130,7 @@ npm run dev:server              # Terminal 1: Socket.io server
 npm run dev                     # Terminal 2: React frontend
 
 # Test
-curl http://localhost:8001/health    # Check server status
+curl https://task-project-3frx.onrender.com/health    # Check server status
 
 # Deploy
 # 1. Apply SQL migration from supabase/migrations/006_*
@@ -218,7 +218,7 @@ Check JIRA_UPGRADE_GUIDE.md → "Monitoring & Debugging"
   ↓
 Check browser console for errors
   ↓
-Check /health endpoint: curl http://localhost:8001/health
+Check /health endpoint: curl https://task-project-3frx.onrender.com/health
   ↓
 Check database for activity logs
   ↓

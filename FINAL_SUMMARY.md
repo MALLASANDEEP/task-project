@@ -227,7 +227,7 @@ Terminal 2: npm run dev           # React on 5173
 
 ### 3. Test Kanban Board (5 min)
 ```
-1. Open http://localhost:5173
+1. Open https://task-project-3frx.onrender.com
 2. Navigate to Tasks page
 3. Open two browser windows side-by-side
 4. In Window 1: Drag task from "To Do" → "In Progress"

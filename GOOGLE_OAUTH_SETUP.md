@@ -18,7 +18,7 @@
    - Click "Create Credentials" > "OAuth client ID"
    - Choose "Web application"
    - Add authorized redirect URIs:
-     - For local dev: `http://localhost:8081`
+     - For local dev: `https://task-project-3frx.onrender.com`
      - For production: `https://yourdomain.com`
    - Copy your Client ID and Client Secret
 
@@ -31,7 +31,7 @@
 5. Enable Google provider
 6. Paste your Google Client ID and Client Secret
 7. Add redirect URLs (both will be used):
-   - `http://localhost:8081/auth/callback` (local dev)
+   - `https://task-project-3frx.onrender.com/auth/callback` (local dev)
    - `https://yourdomain.com/auth/callback` (production)
 8. Save
 
@@ -51,12 +51,12 @@ For local development on port 8081:
 npm run dev
 ```
 
-Visit `http://localhost:8081/login` and click the Google button.
+Visit `https://task-project-3frx.onrender.com/login` and click the Google button.
 
 ## Troubleshooting
 
 **Error: "Unsafe attempt to load URL"**
-- Make sure Supabase has `http://localhost:8081/auth/callback` in authorized redirect URIs
+- Make sure Supabase has `https://task-project-3frx.onrender.com/auth/callback` in authorized redirect URIs
 - Clear browser cache and restart dev server
 
 **Error: "OAuth provider not configured"**
@@ -71,7 +71,7 @@ Visit `http://localhost:8081/login` and click the Google button.
 ## Local Development vs Production
 
 The app automatically uses the current origin for OAuth redirect:
-- Dev: `http://localhost:8081/auth/callback`
+- Dev: `https://task-project-3frx.onrender.com/auth/callback`
 - Production: `https://yourdomain.com/auth/callback`
 
 **No configuration needed**—both URLs work as long as they're in Supabase's authorized list.
@@ -79,4 +79,4 @@ The app automatically uses the current origin for OAuth redirect:
 ## Switching Between Dev Ports
 
 If you run on a different port (e.g., 3000 instead of 8081), add that redirect URL to Supabase:
-- `http://localhost:YOUR_PORT/auth/callback`
+- `https://task-project-3frx.onrender.com/auth/callback`

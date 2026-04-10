@@ -61,7 +61,7 @@ VITE_SUPABASE_ANON_KEY=your_anon_key
 
 # Socket.io
 SOCKET_PORT=8001
-SOCKET_CORS_ORIGIN=http://localhost:5173,http://localhost:3000
+SOCKET_CORS_ORIGIN=https://task-project-3frx.onrender.com,https://task-project-3frx.onrender.com
 EOF
     echo "📝 Created .env.local - Please update with your Supabase credentials"
     read -p "❓ Updated .env.local? (y/n) " -n 1 -r
@@ -98,7 +98,7 @@ echo ""
 echo "Terminal 2 (React Frontend on port 5173):"
 echo "  $ npm run dev"
 echo ""
-echo "Then open browser to: http://localhost:5173"
+echo "Then open browser to: https://task-project-3frx.onrender.com"
 echo ""
 echo "═════════════════════════════════════════════════════════════════"
 echo "✨ TESTING CHECKLIST"
@@ -146,7 +146,7 @@ echo "🎯 NEXT STEPS"
 echo "═════════════════════════════════════════════════════════════════"
 echo ""
 echo "1. Start both servers (see above)"
-echo "2. Open http://localhost:5173"
+echo "2. Open https://task-project-3frx.onrender.com"
 echo "3. Go to Tasks page"
 echo "4. Test Kanban drag-and-drop (see checklist above)"
 echo "5. Open two windows and verify real-time sync"

@@ -285,7 +285,7 @@ Root Directory
 You'll know everything is working when:
 - [x] Migration 006 applies without errors
 - [x] Server starts on port 8001
-- [x] Frontend loads on localhost:5173
+- [x] Frontend loads on task-project-3frx.onrender.com
 - [x] Kanban board displays all tasks
 - [x] Dragging tasks works instantly
 - [x] Two users see updates simultaneously

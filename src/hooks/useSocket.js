@@ -14,7 +14,7 @@ export function useSocket(userId, conversationIds = []) {
   useEffect(() => {
     if (!userId) return;
 
-    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'http://localhost:8001';
+    const socketUrl = import.meta.env.VITE_SOCKET_URL || 'https://task-project-3frx.onrender.com';
     const subscribedEvents = subscribedEventsRef.current;
 
     // Connect to socket server
